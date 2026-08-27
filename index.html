@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transferidor Telegram</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .card { background: #1e1e1e; padding: 30px; border-radius: 12px; width: 100%; max-width: 480px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        h2 { margin-top: 0; color: #0088cc; font-size: 22px; text-align: center; }
+        label { display: block; margin-top: 15px; margin-bottom: 5px; font-size: 14px; color: #ccc; }
+        input, textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 14px; box-sizing: border-box; }
+        textarea { height: 100px; resize: vertical; }
+        button { width: 100%; margin-top: 20px; padding: 14px; border: none; border-radius: 8px; background: #0088cc; color: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #006699; }
+        #status { margin-top: 15px; text-align: center; font-size: 14px; font-weight: bold; }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>🚀 Telegram Forwarder</h2>
+    
+    <label for="githubToken">Token do GitHub (Personal Access Token):</label>
+    <input type="password" id="githubToken" placeholder="github_pat_xxxxxxxxxxxxxx">
+
+    <label for="legenda">Legenda Exata ou Trecho Único:</label>
+    <textarea id="legenda" placeholder="Cole aqui o texto ou nome da legenda..."></textarea>
+
+    <button onclick="dispararAction()">Enviar para o Canal</button>
+
+    <div id="status"></div>
+</div>
+
+<script>
+    document.getElementById('githubToken').value = localStorage.getItem('gh_token') || '';
+
+    async function dispararAction() {
+        const token = document.getElementById('githubToken').value.trim();
+        const legenda = document.getElementById('legenda').value.trim();
+        const statusDiv = document.getElementById('status');
+
+        if (!token || !legenda) {
+            statusDiv.className = 'error';
+            statusDiv.innerText = 'Preencha o Token e a Legenda!';
+            return;
+        }
+
+        localStorage.setItem('gh_token', token);
+        statusDiv.className = '';
+        statusDiv.innerText = '⏳ Enviando comando para o GitHub Actions...';
+
+        // ⚠️ ALTERE APENAS SEU USUÁRIO ABAIXO (Mantenha o NOME DO REPOSITÓRIO):
+        const REPO_OWNER = 'antunesfelipe'; 
+        const REPO_NAME = 'telegram-forwarder';
+        const WORKFLOW_ID = 'transferir.yml';
+
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`;
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.github+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    ref: 'main',
+                    inputs: { legenda_busca: legenda }
+                })
+            });
+
+            if (res.status === 204) {
+                statusDiv.className = 'success';
+                statusDiv.innerText = '✅ Disparado com Sucesso! O GitHub Actions já está buscando o vídeo.';
+                document.getElementById('legenda').value = '';
+            } else {
+                const errData = await res.json();
+                statusDiv.className = 'error';
+                statusDiv.innerText = `Erro (${res.status}): ${errData.message || 'Verifique o token'}`;
+            }
+        } catch (e) {
+            statusDiv.className = 'error';
+            statusDiv.innerText = 'Erro na requisição. Verifique sua conexão.';
+        }
+    }
+</script>
+
+</body>
+</html>
