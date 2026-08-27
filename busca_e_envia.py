@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import sys
-from pyrogram import Client
+from pyrogram import Client, enums
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
@@ -49,39 +49,36 @@ async def main():
         chat_destino_obj = await resolver_chat_seguro(app, CANAL_DESTINO)
 
         encontrado = False
+        ultima_legenda_visto = None
 
-        async for msg in app.get_chat_history(chat_origem_obj.id, limit=3000):
-            if not msg.video: continue
+        # Percorre o histórico mensagem por mensagem sem estourar limite do Telegram
+        async for msg in app.get_chat_history(chat_origem_obj.id, limit=1500):
+            # Armazena o texto/legenda se a mensagem atual for texto ou foto
+            if msg.text:
+                ultima_legenda_visto = msg.text.strip()
+            elif msg.caption:
+                ultima_legenda_visto = msg.caption.strip()
 
-            # Tenta pegar legenda na própria mensagem de vídeo ou nas mensagens imediatamente anteriores
-            legenda_extraida = msg.caption.strip() if msg.caption else None
+            if not msg.video:
+                continue
 
-            if not legenda_extraida:
-                try:
-                    msgs = await app.get_messages(chat_origem_obj.id, [msg.id - 2, msg.id - 1])
-                    msg_ret, msg_ant = msgs[0], msgs[1]
-                    
-                    if msg_ant and not msg_ant.empty and msg_ant.caption:
-                        legenda_extraida = msg_ant.caption.strip()
-                    elif msg_ant and not msg_ant.empty and msg_ant.text:
-                        legenda_extraida = msg_ant.text.strip()
-                except Exception:
-                    pass
+            # Se o próprio vídeo já tiver legenda, usa ela; caso contrário, pega a legenda mais recente vista
+            legenda_final = msg.caption.strip() if msg.caption else ultima_legenda_visto
 
-            if legenda_extraida:
-                leg_norm = normalizar_texto(legenda_extraida)
+            if legenda_final:
+                leg_norm = normalizar_texto(legenda_final)
 
                 if termo_alvo in leg_norm:
                     print(f"🎯 Vídeo Encontrado! ID: {msg.id}", flush=True)
                     
-                    print("📥 Baixando apenas o arquivo de vídeo...", flush=True)
+                    print("📥 Baixando arquivo de vídeo...", flush=True)
                     caminho_video = await app.download_media(msg)
 
                     print("📤 Enviando vídeo com legenda para o canal destino...", flush=True)
                     await app.send_video(
                         chat_id=chat_destino_obj.id, 
                         video=caminho_video, 
-                        caption=legenda_extraida
+                        caption=legenda_final
                     )
 
                     if os.path.exists(caminho_video): 
@@ -90,6 +87,9 @@ async def main():
                     print("✅ Vídeo enviado com sucesso!", flush=True)
                     encontrado = True
                     break
+
+            # Pausa de 100ms a cada vídeo para evitar FloodWait
+            await asyncio.sleep(0.1)
 
         if not encontrado:
             print("⚠️ Nenhuma postagem de vídeo foi encontrada para essa legenda.")
