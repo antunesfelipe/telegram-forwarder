@@ -40,7 +40,7 @@ async def main():
         sys.exit(1)
 
     termo_alvo = normalizar_texto(LEGENDA_BUSCA)
-    print(f"🔍 Procurando no canal por: \"{LEGENDA_BUSCA}\"...", flush=True)
+    print(f"🔍 Procurando vídeo no canal pela legenda: \"{LEGENDA_BUSCA}\"...", flush=True)
 
     app = Client("user_session", api_id=API_ID, api_hash=API_HASH, session_string=TELEGRAM_SESSION)
 
@@ -53,47 +53,46 @@ async def main():
         async for msg in app.get_chat_history(chat_origem_obj.id, limit=3000):
             if not msg.video: continue
 
-            try:
-                msgs = await app.get_messages(chat_origem_obj.id, [msg.id - 2, msg.id - 1])
-                msg_ret, msg_ant = msgs[0], msgs[1]
-            except Exception:
-                continue
+            # Tenta pegar legenda na própria mensagem de vídeo ou nas mensagens imediatamente anteriores
+            legenda_extraida = msg.caption.strip() if msg.caption else None
 
-            legenda_extraida = None
-            id_foto = None
-
-            if msg_ant and not msg_ant.empty and msg_ant.photo and msg_ant.caption:
-                legenda_extraida = msg_ant.caption.strip()
-                id_foto = msg_ant.id
-            elif msg_ant and not msg_ant.empty and msg_ant.text and msg_ret and not msg_ret.empty and msg_ret.photo:
-                legenda_extraida = msg_ant.text.strip()
-                id_foto = msg_ret.id
+            if not legenda_extraida:
+                try:
+                    msgs = await app.get_messages(chat_origem_obj.id, [msg.id - 2, msg.id - 1])
+                    msg_ret, msg_ant = msgs[0], msgs[1]
+                    
+                    if msg_ant and not msg_ant.empty and msg_ant.caption:
+                        legenda_extraida = msg_ant.caption.strip()
+                    elif msg_ant and not msg_ant.empty and msg_ant.text:
+                        legenda_extraida = msg_ant.text.strip()
+                except Exception:
+                    pass
 
             if legenda_extraida:
                 leg_norm = normalizar_texto(legenda_extraida)
 
                 if termo_alvo in leg_norm:
-                    print(f"🎯 Post Encontrado! Vídeo ID: {msg.id}", flush=True)
+                    print(f"🎯 Vídeo Encontrado! ID: {msg.id}", flush=True)
                     
-                    foto_msg = await app.get_messages(chat_origem_obj.id, id_foto)
-                    
-                    print("📥 Baixando foto e vídeo...", flush=True)
-                    caminho_foto = await app.download_media(foto_msg)
+                    print("📥 Baixando apenas o arquivo de vídeo...", flush=True)
                     caminho_video = await app.download_media(msg)
 
-                    print("📤 Enviando para o canal destino...", flush=True)
-                    await app.send_photo(chat_id=chat_destino_obj.id, photo=caminho_foto, caption=legenda_extraida)
-                    await app.send_video(chat_id=chat_destino_obj.id, video=caminho_video)
+                    print("📤 Enviando vídeo com legenda para o canal destino...", flush=True)
+                    await app.send_video(
+                        chat_id=chat_destino_obj.id, 
+                        video=caminho_video, 
+                        caption=legenda_extraida
+                    )
 
-                    if os.path.exists(caminho_foto): os.remove(caminho_foto)
-                    if os.path.exists(caminho_video): os.remove(caminho_video)
+                    if os.path.exists(caminho_video): 
+                        os.remove(caminho_video)
 
-                    print("✅ Transferência concluída com sucesso!", flush=True)
+                    print("✅ Vídeo enviado com sucesso!", flush=True)
                     encontrado = True
                     break
 
         if not encontrado:
-            print("⚠️ Nenhuma postagem foi encontrada com a legenda informada.")
+            print("⚠️ Nenhuma postagem de vídeo foi encontrada para essa legenda.")
 
 if __name__ == "__main__":
     asyncio.run(main())
