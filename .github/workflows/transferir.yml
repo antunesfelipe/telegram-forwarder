@@ -1,0 +1,33 @@
+name: Transferir Midia Solicitada
+
+on:
+  workflow_dispatch:
+    inputs:
+      legenda_busca:
+        description: 'Legenda exata a buscar'
+        required: true
+        type: string
+
+jobs:
+  transferir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install pyrogram tgcrypto
+
+      - name: Run Search & Send
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          CANAL_ORIGEM: ${{ secrets.CANAL_ORIGEM }}
+          CANAL_DESTINO: ${{ secrets.CANAL_DESTINO }}
+          TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+          LEGENDA_BUSCA: ${{ github.event.inputs.legenda_busca }}
+        run: python busca_e_envia.py
