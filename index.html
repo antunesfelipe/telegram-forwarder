@@ -3,18 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transferidor Telegram</title>
+    <title>Telegram Forwarder</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: #1e1e1e; padding: 30px; border-radius: 12px; width: 100%; max-width: 480px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
         h2 { margin-top: 0; color: #0088cc; font-size: 22px; text-align: center; }
         label { display: block; margin-top: 15px; margin-bottom: 5px; font-size: 14px; color: #ccc; }
-        textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 14px; box-sizing: border-box; height: 110px; resize: vertical; }
-        button { width: 100%; margin-top: 20px; padding: 14px; border: none; border-radius: 8px; background: #0088cc; color: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        button:hover { background: #006699; }
-        #status { margin-top: 15px; text-align: center; font-size: 14px; font-weight: bold; }
-        .success { color: #4caf50; }
-        .error { color: #f44336; }
+        textarea { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 14px; box-sizing: border-box; height: 100px; resize: vertical; }
+        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+        button { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 15px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-send { background: #0088cc; color: white; }
+        .btn-send:hover { background: #006699; }
+        .btn-cancel { background: #d32f2f; color: white; display: none; }
+        .btn-cancel:hover { background: #9a0007; }
+        #status { margin-top: 20px; padding: 12px; border-radius: 8px; text-align: center; font-size: 14px; font-weight: bold; background: #2a2a2a; display: none; }
+        .in_progress { color: #ffb74d; border: 1px solid #ffb74d; }
+        .success { color: #81c784; border: 1px solid #81c784; }
+        .failure { color: #e57373; border: 1px solid #e57373; }
     </style>
 </head>
 <body>
@@ -25,30 +30,30 @@
     <label for="legenda">Legenda Exata ou Trecho Único:</label>
     <textarea id="legenda" placeholder="Cole aqui o texto ou nome da legenda..."></textarea>
 
-    <button onclick="dispararAction()">Enviar Vídeo para o Canal</button>
+    <div class="btn-group">
+        <button class="btn-send" id="btnSend" onclick="dispararAction()">Enviar Vídeo</button>
+        <button class="btn-cancel" id="btnCancel" onclick="cancelarRun()">Parar Execução</button>
+    </div>
 
     <div id="status"></div>
 </div>
 
 <script>
-    // ⚠️ CONFIGURAÇÕES FIXAS (Preencha uma única vez aqui):
-    const GITHUB_TOKEN = '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'; // Cole seu token aqui
-    const REPO_OWNER = 'antunesfelipe';           // Seu usuário do GitHub
+    // ⚠️ SUAS CONFIGURAÇÕES:
+    const GITHUB_TOKEN = 'github_pat_SUA_CHAVE_AQUI'; // Cole seu token aqui
+    const REPO_OWNER = 'SEU_USUARIO_GITHUB';           // Seu usuário do GitHub
     const REPO_NAME = 'telegram-forwarder';
     const WORKFLOW_ID = 'transferir.yml';
 
+    let currentRunId = null;
+    let pollInterval = null;
+
     async function dispararAction() {
         const legenda = document.getElementById('legenda').value.trim();
-        const statusDiv = document.getElementById('status');
+        if (!legenda) return atualizarStatus('Por favor, digite a legenda!', 'failure');
 
-        if (!legenda) {
-            statusDiv.className = 'error';
-            statusDiv.innerText = 'Por favor, digite a legenda!';
-            return;
-        }
-
-        statusDiv.className = '';
-        statusDiv.innerText = '⏳ Enviando comando para o GitHub Actions...';
+        atualizarStatus('⏳ Solicitando execução no GitHub...', 'in_progress');
+        document.getElementById('btnSend').disabled = true;
 
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`;
 
@@ -60,25 +65,83 @@
                     'Accept': 'application/vnd.github+json',
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    ref: 'main',
-                    inputs: { legenda_busca: legenda }
-                })
+                body: JSON.stringify({ ref: 'main', inputs: { legenda_busca: legenda } })
             });
 
             if (res.status === 204) {
-                statusDiv.className = 'success';
-                statusDiv.innerText = '✅ Enviado! O GitHub Actions está processando o vídeo.';
-                document.getElementById('legenda').value = '';
+                setTimeout(monitorarStatus, 4000); // Aguarda a Action iniciar para capturar o ID
             } else {
-                const errData = await res.json();
-                statusDiv.className = 'error';
-                statusDiv.innerText = `Erro (${res.status}): ${errData.message || 'Verifique o token ou repositório'}`;
+                const err = await res.json();
+                atualizarStatus(`Erro (${res.status}): ${err.message}`, 'failure');
+                document.getElementById('btnSend').disabled = false;
             }
         } catch (e) {
-            statusDiv.className = 'error';
-            statusDiv.innerText = 'Erro na requisição. Verifique sua conexão.';
+            atualizarStatus('Erro de conexão ao disparar.', 'failure');
+            document.getElementById('btnSend').disabled = false;
         }
+    }
+
+    async function monitorarStatus() {
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs?workflow_id=${WORKFLOW_ID}&per_page=1`;
+
+        try {
+            const res = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` }
+            });
+            const data = await res.json();
+            
+            if (data.workflow_runs && data.workflow_runs.length > 0) {
+                const latestRun = data.workflow_runs[0];
+                currentRunId = latestRun.id;
+
+                if (latestRun.status === 'in_progress' || latestRun.status === 'queued') {
+                    atualizarStatus(`⏳ Robô rodando no GitHub Actions... (Status: ${latestRun.status})`, 'in_progress');
+                    document.getElementById('btnCancel').style.display = 'block';
+                    pollInterval = setTimeout(monitorarStatus, 3000);
+                } else if (latestRun.status === 'completed') {
+                    document.getElementById('btnCancel').style.display = 'none';
+                    document.getElementById('btnSend').disabled = false;
+                    
+                    if (latestRun.conclusion === 'success') {
+                        atualizarStatus('✅ Processo concluído com sucesso!', 'success');
+                    } else {
+                        atualizarStatus(`❌ Ocorreu uma falha no script (Conclusão: ${latestRun.conclusion}).`, 'failure');
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async function cancelarRun() {
+        if (!currentRunId) return;
+
+        atualizarStatus('⏳ Cancelando execução...', 'in_progress');
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${currentRunId}/cancel`;
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` }
+            });
+
+            if (res.status === 202) {
+                clearTimeout(pollInterval);
+                atualizarStatus('🛑 Execução cancelada pelo usuário.', 'failure');
+                document.getElementById('btnCancel').style.display = 'none';
+                document.getElementById('btnSend').disabled = false;
+            }
+        } catch (e) {
+            alert('Não foi possível cancelar a execução.');
+        }
+    }
+
+    function atualizarStatus(msg, tipo) {
+        const div = document.getElementById('status');
+        div.style.display = 'block';
+        div.className = tipo;
+        div.innerText = msg;
     }
 </script>
 
