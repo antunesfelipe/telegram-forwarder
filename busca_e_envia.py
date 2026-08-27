@@ -3,14 +3,14 @@ import re
 import asyncio
 import sys
 import unicodedata
-from pyrogram import Client
+from pyrogram import Client, enums
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 CANAL_ORIGEM = os.environ["CANAL_ORIGEM"]
 CANAL_DESTINO = os.environ["CANAL_DESTINO"]
 TELEGRAM_SESSION = os.environ["TELEGRAM_SESSION"]
-LEGENDA_BUSCA = os.environ.get("LEGENDA_BUSCA", "").strip()
+LEGENDA_INPUT = os.environ.get("LEGENDA_BUSCA", "").strip()
 
 def normalizar_texto(texto):
     if not texto: return ""
@@ -21,7 +21,7 @@ def normalizar_texto(texto):
     return ' '.join(txt.split())
 
 async def carregar_cache_dialogos(app):
-    async for dialog in app.get_dialogs(limit=50): pass
+    async for dialog in app.get_dialogs(limit=30): pass
 
 async def resolver_chat_seguro(app, identificador):
     ident = str(identificador).strip()
@@ -36,66 +36,97 @@ async def resolver_chat_seguro(app, identificador):
     if not ident.startswith("@"): ident = f"@{ident}"
     return await app.get_chat(ident)
 
+async def buscar_e_enviar_video(app, chat_origem_obj, chat_destino_obj, legenda_busca):
+    termo_alvo = normalizar_texto(legenda_busca)
+    print(f"\n⚡ [TURBO] Buscando instantaneamente no Telegram: \"{legenda_busca}\"...", flush=True)
+
+    # 1. Tenta a BUSCA DIRETA do Telegram (MUITO MAIS RÁPIDA)
+    mensagens_encontradas = []
+    try:
+        async for m in app.search_messages(chat_origem_obj.id, query=legenda_busca, limit=20):
+            mensagens_encontradas.append(m)
+    except Exception as e:
+        print(f"Aviso na busca direta: {e}", flush=True)
+
+    # 2. Se a busca direta retornar resultados, analisa eles primeiro
+    for msg_alvo in mensagens_encontradas:
+        # Se a mensagem achada for o próprio vídeo
+        if msg_alvo.video:
+            leg = msg_alvo.caption or legenda_busca
+            print(f"🎯 Vídeo Encontrado Direto! ID: {msg_alvo.id}", flush=True)
+            return await baixar_e_enviar(app, chat_origem_obj, chat_destino_obj, msg_alvo, leg)
+
+        # Se for um texto ou foto, procura o vídeo mais próximo (ID + 1 ou ID + 2)
+        else:
+            ids_proximos = [msg_alvo.id + 1, msg_alvo.id + 2, msg_alvo.id - 1]
+            for pid in ids_proximos:
+                try:
+                    vmsg = await app.get_messages(chat_origem_obj.id, pid)
+                    if vmsg and vmsg.video:
+                        print(f"🎯 Vídeo Encontrado via texto associado! ID: {vmsg.id}", flush=True)
+                        return await baixar_e_enviar(app, chat_origem_obj, chat_destino_obj, vmsg, msg_alvo.text or msg_alvo.caption or legenda_busca)
+                except Exception:
+                    continue
+
+    # 3. Fallback rápido: Varre apenas os últimos 300 vídeos se a busca exata falhar
+    print("⚠️ Busca direta não achou exato. Fazendo varredura rápida nos últimos vídeos...", flush=True)
+    async for msg in app.get_chat_history(chat_origem_obj.id, limit=300):
+        if not msg.video: continue
+
+        legenda_extraida = msg.caption.strip() if msg.caption else None
+
+        if not legenda_extraida:
+            try:
+                vizinhos = await app.get_messages(chat_origem_obj.id, [msg.id - 1, msg.id - 2])
+                for v in vizinhos:
+                    if v and (v.caption or v.text):
+                        legenda_extraida = (v.caption or v.text).strip()
+                        break
+            except Exception: pass
+
+        if legenda_extraida and termo_alvo in normalizar_texto(legenda_extraida):
+            print(f"🎯 Vídeo Encontrado no histórico! ID: {msg.id}", flush=True)
+            return await baixar_e_enviar(app, chat_origem_obj, chat_destino_obj, msg, legenda_extraida)
+
+    return False
+
+async def baixar_e_enviar(app, chat_origem_obj, chat_destino_obj, msg_video, legenda):
+    print("📥 Baixando vídeo...", flush=True)
+    caminho_video = await app.download_media(msg_video)
+
+    print("📤 Enviando para o destino...", flush=True)
+    await app.send_video(
+        chat_id=chat_destino_obj.id, 
+        video=caminho_video, 
+        caption=legenda
+    )
+
+    if os.path.exists(caminho_video): 
+        os.remove(caminho_video)
+
+    print("✅ Concluído!", flush=True)
+    return True
+
 async def main():
-    if not LEGENDA_BUSCA:
-        print("❌ Nenhuma legenda foi informada.")
+    if not LEGENDA_INPUT:
+        print("❌ Nenhuma legenda informada.")
         sys.exit(1)
 
-    termo_alvo = normalizar_texto(LEGENDA_BUSCA)
-    print(f"🔍 Procurando vídeo no canal pela legenda: \"{LEGENDA_BUSCA}\"...", flush=True)
-
+    legendas = [l.strip() for l in LEGENDA_INPUT.split("|||") if l.strip()]
     app = Client("user_session", api_id=API_ID, api_hash=API_HASH, session_string=TELEGRAM_SESSION)
 
     async with app:
         chat_origem_obj = await resolver_chat_seguro(app, CANAL_ORIGEM)
         chat_destino_obj = await resolver_chat_seguro(app, CANAL_DESTINO)
 
-        encontrado = False
+        sucessos = 0
+        for leg in legendas:
+            ok = await buscar_e_enviar_video(app, chat_origem_obj, chat_destino_obj, leg)
+            if ok: sucessos += 1
 
-        # Busca até 3000 mensagens mais recentes
-        async for msg in app.get_chat_history(chat_origem_obj.id, limit=3000):
-            if not msg.video: continue
-
-            # Tenta encontrar texto/legenda na propria mensagem ou nas 4 mensagens ao redor (ID -2 até ID +2)
-            ids_vizinhos = list(range(msg.id - 2, msg.id + 3))
-            msgs_vizinhas = await app.get_messages(chat_origem_obj.id, ids_vizinhos)
-
-            legenda_extraida = msg.caption.strip() if msg.caption else None
-
-            if not legenda_extraida and msgs_vizinhas:
-                for m in msgs_vizinhas:
-                    if m and not m.empty:
-                        txt = m.caption or m.text
-                        if txt:
-                            legenda_extraida = txt.strip()
-                            break
-
-            if legenda_extraida:
-                leg_norm = normalizar_texto(legenda_extraida)
-
-                if termo_alvo in leg_norm:
-                    print(f"🎯 Vídeo Encontrado! ID: {msg.id}", flush=True)
-                    
-                    print("📥 Baixando apenas o arquivo de vídeo...", flush=True)
-                    caminho_video = await app.download_media(msg)
-
-                    print("📤 Enviando vídeo com legenda para o canal destino...", flush=True)
-                    await app.send_video(
-                        chat_id=chat_destino_obj.id, 
-                        video=caminho_video, 
-                        caption=legenda_extraida
-                    )
-
-                    if os.path.exists(caminho_video): 
-                        os.remove(caminho_video)
-
-                    print("✅ Vídeo enviado com sucesso!", flush=True)
-                    encontrado = True
-                    break
-
-        if not encontrado:
-            print("⚠️ Nenhuma postagem de vídeo foi encontrada para essa legenda.")
-            sys.exit(1) # Faz o GitHub Actions registrar a falha corretamente no painel
+        if sucessos == 0:
+            print("⚠️ Vídeo não encontrado.")
+            sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
