@@ -1,15 +1,15 @@
-name: Transferir Midia Solicitada
+name: Telegram Forwarder Engine
 
 on:
   workflow_dispatch:
     inputs:
       legenda_busca:
-        description: 'Legenda exata a buscar'
-        required: true
+        description: 'Legenda exata a buscar (deixe em branco apenas para atualizar legendas)'
+        required: false
         type: string
 
 jobs:
-  transferir:
+  processar:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -20,12 +20,27 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies fast
-        run: |
-          python -m pip install --upgrade pip
-          pip install --only-binary=:all: pyrogram tgcrypto
+      - name: Install dependencies
+        run: pip install --only-binary=:all: pyrogram tgcrypto
 
-      - name: Run Search & Send
+      - name: Indexar Legendas do Canal
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          CANAL_ORIGEM: ${{ secrets.CANAL_ORIGEM }}
+          TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+        run: python atualizar_legendas.py
+
+      - name: Commit e Push do legendas.json
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add legendas.json
+          git commit -m "Atualizando lista de legendas [skip ci]" || exit 0
+          git push
+
+      - name: Executar Envio de Mídia
+        if: ${{ github.event.inputs.legenda_busca != '' }}
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
