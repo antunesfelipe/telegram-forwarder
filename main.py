@@ -190,6 +190,26 @@ def obter_legendas():
             return json.load(f)
     return []
 
+@app.get("/varrer")
+async def varrer_canal():
+    app_pyro = obter_cliente_telegram()
+    legendas = []
+    try:
+        async with app_pyro:
+            canal_origem = await resolver_canal(app_pyro, os.environ.get("CANAL_ORIGEM", ""))
+            async for msg in app_pyro.get_chat_history(canal_origem, limit=300):
+                txt = msg.caption or msg.text or ""
+                txt_limpo = " ".join(txt.strip().split())
+                if txt_limpo and txt_limpo not in legendas:
+                    legendas.append(txt_limpo)
+        
+        with open("legendas.json", "w", encoding="utf-8") as f:
+            json.dump(legendas, f, ensure_ascii=False, indent=4)
+            
+        return legendas
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao varrer canal: {str(e)}")
+
 @app.get("/status_progresso")
 def status_progresso():
     return estado_envio
