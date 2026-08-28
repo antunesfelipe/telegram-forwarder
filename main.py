@@ -15,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Limita o uso de memória do garbage collector
 gc.set_threshold(100, 5, 5)
 
 estado_envio = {
@@ -27,7 +26,7 @@ estado_envio = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Servidor iniciando em modo de economia extrema de RAM...")
+    print("🚀 Servidor iniciando...")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -53,27 +52,31 @@ def obter_cliente_telegram():
         api_id=api_id, 
         api_hash=api_hash, 
         session_string=session,
-        max_concurrent_transfers=1  # Evita baixar/enviar múltiplos blocos ao mesmo tempo para economizar RAM
+        max_concurrent_transfers=1
     )
 
-async def obter_peer_chat(app_pyro: Client, valor: str):
+async def resolver_canal(app_pyro: Client, valor: str):
+    """ Resolve o canal aceitando ID numérico, username ou link """
     valor_str = str(valor).strip()
-    if "t.me/" in valor_str or valor_str.startswith("@"):
+    if not valor_str:
+        raise ValueError("A variável do canal não foi configurada.")
+        
+    try:
+        if valor_str.startswith("-") and valor_str[1:].isdigit():
+            chat_id = int(valor_str)
+            try:
+                chat = await app_pyro.get_chat(chat_id)
+                return chat.id
+            except Exception:
+                async for dialog in app_pyro.get_dialogs(limit=100):
+                    if dialog.chat.id == chat_id:
+                        return dialog.chat.id
+                return chat_id
+                
         chat = await app_pyro.get_chat(valor_str)
         return chat.id
-        
-    if valor_str.startswith("-") and valor_str[1:].isdigit():
-        chat_id = int(valor_str)
-        try:
-            chat = await app_pyro.get_chat(chat_id)
-            return chat.id
-        except Exception:
-            async for dialog in app_pyro.get_dialogs():
-                if dialog.chat.id == chat_id:
-                    return dialog.chat.id
-            raise ValueError(f"Canal {chat_id} não encontrado na sessão.")
-            
-    return valor_str
+    except Exception as e:
+        raise ValueError(f"Não foi possível acessar o canal ({valor_str}): {str(e)}")
 
 async def executar_varredura():
     app_pyro = obter_cliente_telegram()
@@ -81,9 +84,9 @@ async def executar_varredura():
 
     async with app_pyro:
         canal_origem_raw = os.environ.get("CANAL_ORIGEM", "")
-        canal_origem = await obter_peer_chat(app_pyro, canal_origem_raw)
+        canal_origem = await resolver_canal(app_pyro, canal_origem_raw)
         
-        async for msg in app_pyro.get_chat_history(canal_origem, limit=2000):
+        async for msg in app_pyro.get_chat_history(canal_origem, limit=1000):
             txt = msg.caption or msg.text
             if txt:
                 primeira_linha = txt.strip().split('\n')[0].strip()
@@ -117,8 +120,8 @@ async def processar_envio_background(legenda1: str, legenda2: str):
 
     try:
         async with app_pyro:
-            canal_origem = await obter_peer_chat(app_pyro, os.environ.get("CANAL_ORIGEM", ""))
-            canal_destino = await obter_peer_chat(app_pyro, os.environ.get("CANAL_DESTINO", ""))
+            canal_origem = await resolver_canal(app_pyro, os.environ.get("CANAL_ORIGEM", ""))
+            canal_destino = await resolver_canal(app_pyro, os.environ.get("CANAL_DESTINO", ""))
 
             for i, termo in enumerate(buscas):
                 termo_limpo = " ".join(termo.strip().split()).lower()
@@ -127,7 +130,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1} no canal..."
                 estado_envio["videos"][i]["pct"] = 5
                 
-                async for msg in app_pyro.get_chat_history(canal_origem, limit=1000):
+                async for msg in app_pyro.get_chat_history(canal_origem, limit=800):
                     txt = msg.caption or msg.text or ""
                     txt_limpo = " ".join(txt.strip().split()).lower()
                     
@@ -139,14 +142,11 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             def progress_down(current, total):
                                 pct = 10 + int((current / total) * 45)
                                 estado_envio["videos"][i]["pct"] = pct
-                                # Força limpeza de buffers temporários de download
-                                if current % (5 * 1024 * 1024) == 0:  # A cada 5MB
+                                if current % (5 * 1024 * 1024) == 0:
                                     gc.collect()
 
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
                             file_path = await app_pyro.download_media(msg, file_name=caminho_destino, progress=progress_down)
-                            
-                            # Limpeza agressiva pós-download
                             gc.collect()
 
                             try:
@@ -171,7 +171,6 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                 encontrado = True
                                 enviados += 1
                             finally:
-                                # Deleta o arquivo baixado IMEDIATAMENTE para liberar espaço no disco do Render
                                 if file_path and os.path.exists(file_path):
                                     os.remove(file_path)
                                 gc.collect()
@@ -207,7 +206,7 @@ async def varrer():
     try:
         return await executar_varredura()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Erro ao varrer canal: {str(e)}")
 
 @app.get("/status_progresso")
 def status_progresso():
