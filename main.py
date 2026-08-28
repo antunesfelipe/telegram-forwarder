@@ -15,6 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
+# Limita o uso de memória do garbage collector
+gc.set_threshold(100, 5, 5)
+
 estado_envio = {
     "em_andamento": False,
     "concluido": False,
@@ -24,7 +27,7 @@ estado_envio = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Servidor iniciando...")
+    print("🚀 Servidor iniciando em modo de economia extrema de RAM...")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -49,7 +52,8 @@ def obter_cliente_telegram():
         "user_session", 
         api_id=api_id, 
         api_hash=api_hash, 
-        session_string=session
+        session_string=session,
+        max_concurrent_transfers=1  # Evita baixar/enviar múltiplos blocos ao mesmo tempo para economizar RAM
     )
 
 async def obter_peer_chat(app_pyro: Client, valor: str):
@@ -121,7 +125,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 encontrado = False
                 
                 estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1} no canal..."
-                estado_envio["videos"][i]["pct"] = 10
+                estado_envio["videos"][i]["pct"] = 5
                 
                 async for msg in app_pyro.get_chat_history(canal_origem, limit=1000):
                     txt = msg.caption or msg.text or ""
@@ -129,22 +133,30 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                     
                     if txt_limpo and termo_limpo in txt_limpo:
                         if msg.video or msg.animation or msg.document:
-                            estado_envio["videos"][i]["msg"] = "Baixando mídia..."
-                            estado_envio["videos"][i]["pct"] = 20
+                            estado_envio["videos"][i]["msg"] = "Baixando mídia por partes..."
+                            estado_envio["videos"][i]["pct"] = 10
                             
                             def progress_down(current, total):
-                                pct = 20 + int((current / total) * 40)
+                                pct = 10 + int((current / total) * 45)
                                 estado_envio["videos"][i]["pct"] = pct
+                                # Força limpeza de buffers temporários de download
+                                if current % (5 * 1024 * 1024) == 0:  # A cada 5MB
+                                    gc.collect()
 
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
                             file_path = await app_pyro.download_media(msg, file_name=caminho_destino, progress=progress_down)
                             
+                            # Limpeza agressiva pós-download
+                            gc.collect()
+
                             try:
-                                estado_envio["videos"][i]["msg"] = "Enviando para destino..."
+                                estado_envio["videos"][i]["msg"] = "Enviando mídia..."
 
                                 def progress_up(current, total):
-                                    pct = 60 + int((current / total) * 38)
+                                    pct = 55 + int((current / total) * 43)
                                     estado_envio["videos"][i]["pct"] = pct
+                                    if current % (5 * 1024 * 1024) == 0:
+                                        gc.collect()
 
                                 caption_enviar = msg.caption or txt
                                 if msg.video:
@@ -159,7 +171,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                 encontrado = True
                                 enviados += 1
                             finally:
-                                # Deleta o arquivo IMEDIATAMENTE para liberar disco e RAM antes do próximo vídeo
+                                # Deleta o arquivo baixado IMEDIATAMENTE para liberar espaço no disco do Render
                                 if file_path and os.path.exists(file_path):
                                     os.remove(file_path)
                                 gc.collect()
