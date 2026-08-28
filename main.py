@@ -8,7 +8,6 @@ import os
 import json
 import tempfile
 import gc
-import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,12 +23,7 @@ estado_envio = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Servidor iniciando... Rodando varredura automática...")
-    try:
-        await executar_varredura()
-        print("✅ Varredura concluída!")
-    except Exception as e:
-        print(f"⚠️ Erro na varredura inicial: {e}")
+    print("🚀 Servidor iniciando...")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -57,32 +51,38 @@ def obter_cliente_telegram():
         session_string=session
     )
 
-def resolver_chat_id(valor: str):
-    """ Sanitiza e corrige IDs de canais/supergrupos do Telegram """
+async def obter_peer_chat(app_pyro: Client, valor: str):
+    """ Resolve o canal via ID numérico, link de convite ou @username """
     valor_str = str(valor).strip()
     
-    # Tratamento para IDs de canais e supergrupos
-    if valor_str.startswith("-"):
-        numeros = re.sub(r"\D", "", valor_str)
+    # Se for link do Telegram ou Username, resolve direto
+    if "t.me/" in valor_str or valor_str.startswith("@"):
+        chat = await app_pyro.get_chat(valor_str)
+        return chat.id
         
-        # Se for um ID de 14 dígitos iniciando com -1003... (erro comum de digitação com '3' extra)
-        # Transforma -1003810645631 em -100810645631 (13 dígitos válidos)
-        if valor_str.startswith("-1003") and len(numeros) == 13:
-            valor_str = "-100" + numeros[4:]
+    # Se for ID numérico
+    if valor_str.startswith("-") and valor_str[1:].isdigit():
+        chat_id = int(valor_str)
+        try:
+            chat = await app_pyro.get_chat(chat_id)
+            return chat.id
+        except Exception:
+            # Se der Peer Invalid, força busca em todos os diálogos do usuário
+            async for dialog in app_pyro.get_dialogs():
+                if dialog.chat.id == chat_id:
+                    return dialog.chat.id
+            raise ValueError(f"Sessão não encontrou o canal {chat_id}. Coloque o LINK de convite do canal na variável de ambiente.")
             
-        return int(valor_str)
-        
-    if valor_str.isdigit():
-        return int(valor_str)
-        
     return valor_str
 
 async def executar_varredura():
-    canal_origem = resolver_chat_id(os.environ.get("CANAL_ORIGEM", ""))
     app_pyro = obter_cliente_telegram()
     legendas = set()
 
     async with app_pyro:
+        canal_origem_raw = os.environ.get("CANAL_ORIGEM", "")
+        canal_origem = await obter_peer_chat(app_pyro, canal_origem_raw)
+        
         async for msg in app_pyro.get_chat_history(canal_origem, limit=2000):
             txt = msg.caption or msg.text
             if txt:
@@ -99,10 +99,6 @@ async def executar_varredura():
 
 async def processar_envio_background(legenda1: str, legenda2: str):
     global estado_envio
-    canal_origem = resolver_chat_id(os.environ.get("CANAL_ORIGEM", ""))
-    canal_destino = resolver_chat_id(os.environ.get("CANAL_DESTINO", ""))
-    
-    # Captura tanto o Vídeo 1 quanto o Vídeo 2 (se fornecido)
     buscas = [l.strip() for l in [legenda1, legenda2] if l and l.strip()]
     total_videos = len(buscas)
     
@@ -119,6 +115,9 @@ async def processar_envio_background(legenda1: str, legenda2: str):
 
     try:
         async with app_pyro:
+            canal_origem = await obter_peer_chat(app_pyro, os.environ.get("CANAL_ORIGEM", ""))
+            canal_destino = await obter_peer_chat(app_pyro, os.environ.get("CANAL_DESTINO", ""))
+
             for i, termo in enumerate(buscas):
                 termo_limpo = " ".join(termo.strip().split()).lower()
                 encontrado = False
@@ -126,7 +125,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1} no canal..."
                 estado_envio["videos"][i]["pct"] = 10
                 
-                async for msg in app_pyro.get_chat_history(canal_origem, limit=500):
+                async for msg in app_pyro.get_chat_history(canal_origem, limit=1000):
                     txt = msg.caption or msg.text or ""
                     txt_limpo = " ".join(txt.strip().split()).lower()
                     
@@ -196,7 +195,7 @@ async def varrer():
     try:
         return await executar_varredura()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Falha na varredura (Verifique o ID do Canal): {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/status_progresso")
 def status_progresso():
