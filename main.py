@@ -6,7 +6,6 @@ except RuntimeError:
 
 import os
 import json
-import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,7 +74,6 @@ async def executar_varredura():
         
     return resultado
 
-# Função geradora de eventos SSE para progresso em tempo real
 async def executar_envio_stream(legenda1: str, legenda2: str):
     canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
     canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
@@ -88,11 +86,13 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
         async for _ in app_pyro.get_dialogs(limit=200):
             pass
 
-        yield f"data: {json.dumps({'status': 'info', 'msg': 'Buscando mensagens no canal...'})}\n\n"
+        yield f"data: {json.dumps({'status': 'info', 'msg': 'Buscando vídeos no canal...'})}\n\n"
+        await asyncio.sleep(0.1)
 
         for termo in buscas:
             encontrado = False
             mensagens = []
+            
             async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
                 mensagens.append(msg)
 
@@ -102,10 +102,8 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
                     msg_video = None
                     legenda_texto = txt
 
-                    # 1. Se a própria mensagem for vídeo/gif
                     if msg.video or msg.animation:
                         msg_video = msg
-                    # 2. Se for texto puro, pega a mensagem enviada logo abaixo (mensagem seguinte)
                     elif idx > 0:
                         msg_seguinte = mensagens[idx - 1]
                         if msg_seguinte.video or msg_seguinte.animation:
@@ -113,34 +111,55 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
 
                     if msg_video:
                         yield f"data: {json.dumps({'status': 'info', 'msg': f'Baixando mídia para: {termo}...'})}\n\n"
+                        await asyncio.sleep(0.1)
                         
-                        file_path = await app_pyro.download_media(msg_video)
+                        queue = asyncio.Queue()
+
+                        # Progress callback que joga dados na fila sem travar a execução
+                        def progress(current, total):
+                            pct = int((current / total) * 50) # 0-50% para download
+                            queue.put_nowait(pct)
+
+                        # Inicia o download em background task
+                        download_task = asyncio.create_task(
+                            app_pyro.download_media(msg_video, progress=progress)
+                        )
+
+                        # Envia os eventos de porcentagem enquanto o arquivo baixa
+                        while not download_task.done() or not queue.empty():
+                            while not queue.empty():
+                                pct = queue.get_nowait()
+                                yield f"data: {json.dumps({'status': 'progress', 'pct': pct, 'termo': termo})}\n\n"
+                            await asyncio.sleep(0.1)
+
+                        file_path = await download_task
                         
                         try:
-                            # Callback para calcular a porcentagem de upload
-                            def progress_callback(current, total):
-                                pct = int((current / total) * 100)
-                                asyncio.create_task(
-                                    # Notifica o progresso do upload
-                                    app.state.event_queue.put({'status': 'progress', 'pct': pct, 'termo': termo})
+                            yield f"data: {json.dumps({'status': 'info', 'msg': f'Enviando mídia para canal destino...'})}\n\n"
+                            await asyncio.sleep(0.1)
+
+                            def progress_up(current, total):
+                                pct = 50 + int((current / total) * 50) # 50-100% para upload
+                                queue.put_nowait(pct)
+
+                            if msg_video.video:
+                                upload_task = asyncio.create_task(
+                                    app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=legenda_texto, progress=progress_up)
+                                )
+                            else:
+                                upload_task = asyncio.create_task(
+                                    app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=legenda_texto, progress=progress_up)
                                 )
 
-                            yield f"data: {json.dumps({'status': 'progress', 'pct': 10, 'termo': termo})}\n\n"
+                            # Envia os eventos de porcentagem enquanto o arquivo sobe
+                            while not upload_task.done() or not queue.empty():
+                                while not queue.empty():
+                                    pct = queue.get_nowait()
+                                    yield f"data: {json.dumps({'status': 'progress', 'pct': pct, 'termo': termo})}\n\n"
+                                await asyncio.sleep(0.1)
+
+                            await upload_task
                             
-                            if msg_video.video:
-                                await app_pyro.send_video(
-                                    chat_id=canal_destino, 
-                                    video=file_path, 
-                                    caption=legenda_texto
-                                )
-                            elif msg_video.animation:
-                                await app_pyro.send_animation(
-                                    chat_id=canal_destino, 
-                                    animation=file_path, 
-                                    caption=legenda_texto
-                                )
-                            
-                            yield f"data: {json.dumps({'status': 'progress', 'pct': 100, 'termo': termo})}\n\n"
                             encontrado = True
                             enviados += 1
                         finally:
