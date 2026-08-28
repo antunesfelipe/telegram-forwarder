@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
+# Limite agressivo para desalocar memória RAM no Render
 gc.set_threshold(100, 5, 5)
 
 estado_envio = {
@@ -56,27 +57,30 @@ def obter_cliente_telegram():
     )
 
 async def resolver_canal(app_pyro: Client, valor: str):
-    """ Resolve o canal aceitando ID numérico, username ou link """
+    """ Resolve o canal aceitando ID numérico (-100...), username (@) ou link (t.me) """
     valor_str = str(valor).strip()
     if not valor_str:
-        raise ValueError("A variável do canal não foi configurada.")
+        raise ValueError("A variável de ambiente do canal não foi configurada.")
         
-    try:
-        if valor_str.startswith("-") and valor_str[1:].isdigit():
-            chat_id = int(valor_str)
-            try:
-                chat = await app_pyro.get_chat(chat_id)
-                return chat.id
-            except Exception:
-                async for dialog in app_pyro.get_dialogs(limit=100):
-                    if dialog.chat.id == chat_id:
-                        return dialog.chat.id
-                return chat_id
-                
+    # Se for link ou @username, resolve direto
+    if "t.me/" in valor_str or valor_str.startswith("@"):
         chat = await app_pyro.get_chat(valor_str)
         return chat.id
-    except Exception as e:
-        raise ValueError(f"Não foi possível acessar o canal ({valor_str}): {str(e)}")
+
+    # Se for ID numérico (ex: -100...)
+    if valor_str.startswith("-") and valor_str[1:].isdigit():
+        chat_id = int(valor_str)
+        try:
+            chat = await app_pyro.get_chat(chat_id)
+            return chat.id
+        except Exception:
+            # Varre os diálogos do usuário para popular o cache de peers da sessão
+            async for dialog in app_pyro.get_dialogs(limit=200):
+                if dialog.chat.id == chat_id:
+                    return dialog.chat.id
+            return chat_id
+            
+    return valor_str
 
 async def executar_varredura():
     app_pyro = obter_cliente_telegram()
