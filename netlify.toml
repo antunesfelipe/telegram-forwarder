@@ -1,6 +1,7 @@
 [build]
   publish = "."
-  command = "echo 'Sem build necessario'"
+  command = "echo 'Build ignorado'"
 
 [build.environment]
-  NETLIFY_NEXT_PLUGIN_SKIP = "true"
+  NETLIFY_SKIP_PYTHON_INSTALL = "true"
+  PYTHON_VERSION = ""
