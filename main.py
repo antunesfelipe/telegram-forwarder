@@ -112,9 +112,50 @@ async def varrer():
     return legendas_atualizadas
 
 @app.post("/enviar")
-async def enviar(payload: EnvioPayload, background_tasks: BackgroundTasks):
+async def enviar(payload: EnvioPayload):
     if not payload.legenda1 and not payload.legenda2:
         raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
 
-    background_tasks.add_task(executar_envio, payload.legenda1, payload.legenda2)
-    return {"status": "Envio processado em segundo plano!"}
+    try:
+        resultado = await executar_envio(payload.legenda1, payload.legenda2)
+        return resultado
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def executar_envio(legenda1: str, legenda2: str):
+    canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
+    canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
+    
+    buscas = [l for l in [legenda1, legenda2] if l]
+    app_pyro = obter_cliente_telegram()
+
+    enviados = 0
+    nao_encontrados = []
+
+    async with app_pyro:
+        # Garante que o Pyrogram reconheça/carregue os chats na memória da sessão
+        async for dialog in app_pyro.get_dialogs(limit=200):
+            pass
+
+        for termo in buscas:
+            encontrado = False
+            async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
+                txt = msg.caption or msg.text
+                if txt and termo.lower() in txt.lower():
+                    await msg.copy(canal_destino)
+                    encontrado = True
+                    enviados += 1
+                    break
+            
+            if not encontrado:
+                nao_encontrados.append(termo)
+
+    if enviados == 0 and nao_encontrados:
+        raise Exception(f"Nenhum vídeo encontrado para: {', '.join(nao_encontrados)}")
+
+    msg_sucesso = f"{enviados} vídeo(s) enviado(s) com sucesso!"
+    if nao_encontrados:
+        msg_sucesso += f" (Não encontrados: {', '.join(nao_encontrados)})"
+
+    return {"status": msg_sucesso}
