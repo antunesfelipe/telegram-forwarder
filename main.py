@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         await executar_varredura()
         print("✅ Varredura concluída!")
     except Exception as e:
-        print(f"⚠️ Erro na varredura: {e}")
+        print(f"⚠️ Erro na varredura inicial: {e}")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -57,7 +57,8 @@ def obter_cliente_telegram():
     )
 
 def resolver_chat_id(valor: str):
-    valor = valor.strip()
+    valor = str(valor).strip()
+    # Converte string numérica para inteiro para o Pyrogram reconhecer
     if valor.startswith("-") and valor[1:].isdigit():
         return int(valor)
     if valor.isdigit():
@@ -65,7 +66,7 @@ def resolver_chat_id(valor: str):
     return valor
 
 async def executar_varredura():
-    canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
+    canal_origem = resolver_chat_id(os.environ.get("CANAL_ORIGEM", ""))
     app_pyro = obter_cliente_telegram()
     legendas = set()
 
@@ -86,9 +87,10 @@ async def executar_varredura():
 
 async def processar_envio_background(legenda1: str, legenda2: str):
     global estado_envio
-    canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
-    canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
+    canal_origem = resolver_chat_id(os.environ.get("CANAL_ORIGEM", ""))
+    canal_destino = resolver_chat_id(os.environ.get("CANAL_DESTINO", ""))
     
+    # Processa Vídeo 1 e Vídeo 2 caso informados
     buscas = [l for l in [legenda1, legenda2] if l.strip()]
     total_videos = len(buscas)
     
@@ -109,10 +111,10 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 termo_limpo = " ".join(termo.strip().split()).lower()
                 encontrado = False
                 
-                estado_envio["videos"][i]["msg"] = f"Buscando no canal..."
+                estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1} no canal..."
                 estado_envio["videos"][i]["pct"] = 10
                 
-                # Variação direta do histórico rápida (limitada às últimas 500 mensagens)
+                # Varrer as mensagens buscando a legenda correspondente
                 async for msg in app_pyro.get_chat_history(canal_origem, limit=500):
                     txt = msg.caption or msg.text or ""
                     txt_limpo = " ".join(txt.strip().split()).lower()
@@ -180,7 +182,10 @@ def obter_legendas():
 
 @app.get("/varrer")
 async def varrer():
-    return await executar_varredura()
+    try:
+        return await executar_varredura()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao varrer canal: {str(e)}")
 
 @app.get("/status_progresso")
 def status_progresso():
