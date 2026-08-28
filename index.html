@@ -27,7 +27,6 @@
             border: 1px solid #282830;
         }
         
-        /* Logo e Título */
         .header-container { text-align: center; margin-bottom: 20px; }
         .logo-img { 
             width: 90px; 
@@ -46,16 +45,15 @@
             letter-spacing: -0.5px;
         }
 
-        /* Labels e Entradas */
         label { 
             display: block; 
-            margin-top: 16px; 
+            margin-top: 14px; 
             margin-bottom: 6px; 
             font-size: 13px; 
             color: #aaa; 
             font-weight: 600; 
         }
-        textarea, input[type="text"] { 
+        textarea, input[type="text"], input[type="password"] { 
             width: 100%; 
             padding: 12px; 
             border-radius: 8px; 
@@ -66,12 +64,11 @@
             outline: none;
             transition: border-color 0.2s;
         }
-        textarea:focus, input[type="text"]:focus {
+        textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
             border-color: #0088cc;
         }
         textarea { height: 60px; resize: vertical; }
         
-        /* Botões Principais */
         .btn-group { display: flex; gap: 10px; margin-top: 22px; }
         button { 
             padding: 12px 16px; 
@@ -88,7 +85,6 @@
         .btn-cancel { background: #d32f2f; color: white; display: none; }
         .btn-cancel:hover { background: #9a0007; }
 
-        /* Botões de Ação Secundários */
         .btn-action { 
             background: #2a2a32; 
             color: #0088cc; 
@@ -117,7 +113,6 @@
         }
         .btn-small-add:hover { background: #0088cc; color: #fff; border-color: #0088cc; }
         
-        /* Caixas de Status */
         #status-box { 
             margin-top: 18px; 
             padding: 12px; 
@@ -131,7 +126,6 @@
         .success { color: #81c784; background: rgba(129, 199, 132, 0.1); border: 1px solid #81c784; }
         .failure { color: #e57373; background: rgba(229, 115, 115, 0.1); border: 1px solid #e57373; }
 
-        /* Seções e Listas */
         .section-box { margin-top: 22px; border-top: 1px solid #282830; padding-top: 16px; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .section-title { font-size: 13px; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -165,8 +159,10 @@
         <h2>🚀 Telegram Forwarder</h2>
     </div>
 
-    <!-- Legendas do Canal de Origem -->
-    <div class="section-box" style="border-top: none; padding-top: 0;">
+    <label for="ghToken">🔑 Seu GitHub Personal Token:</label>
+    <input type="password" id="ghToken" placeholder="Cole seu novo token aqui (github_pat_...)" onchange="salvarToken()">
+
+    <div class="section-box">
         <div class="section-header">
             <span class="section-title">🔍 Canal de Origem</span>
             <button class="btn-action" onclick="forcarVarreduraCanal()">🔄 Forçar Varredura</button>
@@ -179,7 +175,6 @@
         </div>
     </div>
 
-    <!-- Entradas de Vídeos -->
     <label for="legenda1">Vídeo 1 - Legenda Exata:</label>
     <textarea id="legenda1" placeholder="Selecione acima ou cole a legenda aqui..."></textarea>
 
@@ -193,7 +188,6 @@
 
     <div id="status-box"></div>
 
-    <!-- Histórico de Envios -->
     <div class="section-box">
         <div class="section-header">
             <span class="section-title">📋 Histórico de Envios</span>
@@ -206,8 +200,6 @@
 </div>
 
 <script>
-    // ⚠️ ALERTA DE CONFIGURAÇÃO: Substitua os dados abaixo pelos da sua conta do GitHub!
-    const GITHUB_TOKEN = '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'; 
     const REPO_OWNER = 'antunesfelipe';           
     const REPO_NAME = 'telegram-forwarder';
     const WORKFLOW_ID = 'transferir.yml';
@@ -218,11 +210,21 @@
     let modoVarredura = false;
 
     window.onload = () => {
+        const tokenSalvo = localStorage.getItem('gh_token') || '';
+        document.getElementById('ghToken').value = tokenSalvo;
         carregarLegendasJSON();
         carregarHistorico();
     };
 
-    // Lê o JSON estático gerado no repositório
+    function salvarToken() {
+        const token = document.getElementById('ghToken').value.trim();
+        localStorage.setItem('gh_token', token);
+    }
+
+    function obterToken() {
+        return document.getElementById('ghToken').value.trim() || localStorage.getItem('gh_token') || '';
+    }
+
     async function carregarLegendasJSON() {
         try {
             const res = await fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/legendas.json?v=${Date.now()}`);
@@ -237,7 +239,6 @@
         }
     }
 
-    // Filtro instantâneo na digitação
     function filtrarLegendas() {
         const termo = document.getElementById('searchInput').value.toLowerCase();
         const filtradas = legendasCanal.filter(l => l.toLowerCase().includes(termo));
@@ -263,8 +264,10 @@
         document.getElementById(campoId).value = texto;
     }
 
-    // Solicita atualização de legendas ao GitHub
     async function forcarVarreduraCanal() {
+        const token = obterToken();
+        if (!token) return atualizarStatus('Por favor, insira o seu GitHub Personal Token acima!', 'failure');
+
         modoVarredura = true;
         atualizarStatus('⏳ Solicitando varredura ao GitHub...', 'in_progress');
         
@@ -272,7 +275,7 @@
             const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                    'Authorization': `Bearer ${token}`,
                     'Accept': 'application/vnd.github+json',
                     'Content-Type': 'application/json'
                 },
@@ -283,15 +286,17 @@
                 setTimeout(monitorarStatus, 3000);
             } else {
                 const err = await res.json().catch(() => ({}));
-                atualizarStatus(`Erro (${res.status}): ${err.message || 'Verifique se o token tem a permissão Workflows.'}`, 'failure');
+                atualizarStatus(`Erro (${res.status}): ${err.message || 'Verifique se o token é válido.'}`, 'failure');
             }
         } catch (e) {
             atualizarStatus('Erro de conexão com o GitHub.', 'failure');
         }
     }
 
-    // Solicita o envio dos vídeos
     async function dispararActions() {
+        const token = obterToken();
+        if (!token) return atualizarStatus('Por favor, insira o seu GitHub Personal Token acima!', 'failure');
+
         modoVarredura = false;
         const leg1 = document.getElementById('legenda1').value.trim();
         const leg2 = document.getElementById('legenda2').value.trim();
@@ -306,7 +311,7 @@
             const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                    'Authorization': `Bearer ${token}`,
                     'Accept': 'application/vnd.github+json',
                     'Content-Type': 'application/json'
                 },
@@ -326,12 +331,12 @@
         }
     }
 
-    // Monitora o progresso do Workflow
     async function monitorarStatus() {
+        const token = obterToken();
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs?workflow_id=${WORKFLOW_ID}&per_page=1`;
 
         try {
-            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` } });
+            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
             const data = await res.json();
             
             if (data.workflow_runs && data.workflow_runs.length > 0) {
@@ -364,11 +369,12 @@
     }
 
     async function cancelarRun() {
+        const token = obterToken();
         if (!currentRunId) return;
         atualizarStatus('⏳ Cancelando execução...', 'in_progress');
         await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${currentRunId}/cancel`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
         clearTimeout(pollInterval);
         atualizarStatus('🛑 Execução cancelada.', 'failure');
