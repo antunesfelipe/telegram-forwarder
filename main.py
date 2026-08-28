@@ -9,25 +9,30 @@ import json
 import tempfile
 import gc
 import shutil
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Limpeza agressiva para container de 512MB RAM
-gc.set_threshold(100, 5, 5)
+gc.set_threshold(50, 5, 5)
+
+# ID único do processo pra o front saber se o server reiniciou
+SERVER_RUN_ID = str(int(time.time()))
 
 estado_envio = {
+    "server_id": SERVER_RUN_ID,
     "em_andamento": False,
     "concluido": False,
+    "erro_fatal": False,
     "msg_final": "",
     "videos": []
 }
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Servidor iniciando...")
+    print(f"🚀 Servidor iniciando... [ID: {SERVER_RUN_ID}]")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -45,21 +50,19 @@ class EnvioPayload(BaseModel):
     legenda2: str = ""
 
 def obter_cliente_telegram():
-    api_id = int(os.environ["API_ID"])
-    api_hash = os.environ["API_HASH"]
-    session = os.environ["TELEGRAM_SESSION"]
     return Client(
         "user_session", 
-        api_id=api_id, 
-        api_hash=api_hash, 
-        session_string=session,
+        api_id=int(os.environ["API_ID"]), 
+        api_hash=os.environ["API_HASH"], 
+        session_string=os.environ["TELEGRAM_SESSION"],
+        workers=2,
         max_concurrent_transmissions=1
     )
 
 async def resolver_canal(app_pyro: Client, valor: str):
     valor_str = str(valor).strip()
     if not valor_str:
-        raise ValueError("Variável do canal não configurada.")
+        raise ValueError("Variável de canal não configurada.")
         
     if "t.me/" in valor_str or valor_str.startswith("@"):
         chat = await app_pyro.get_chat(valor_str)
@@ -73,35 +76,12 @@ async def resolver_canal(app_pyro: Client, valor: str):
         except Exception:
             pass
 
-        async for dialog in app_pyro.get_dialogs(limit=500):
+        async for dialog in app_pyro.get_dialogs(limit=300):
             if dialog.chat.id == chat_id:
                 return dialog.chat.id
-        
         return chat_id
 
     return valor_str
-
-async def executar_varredura():
-    app_pyro = obter_cliente_telegram()
-    legendas = set()
-
-    async with app_pyro:
-        canal_origem_raw = os.environ.get("CANAL_ORIGEM", "")
-        canal_origem = await resolver_canal(app_pyro, canal_origem_raw)
-        
-        async for msg in app_pyro.get_chat_history(canal_origem, limit=1000):
-            txt = msg.caption or msg.text
-            if txt:
-                primeira_linha = txt.strip().split('\n')[0].strip()
-                if len(primeira_linha) > 2:
-                    legendas.add(primeira_linha)
-
-    resultado = sorted(list(legendas))
-    with open("legendas.json", "w", encoding="utf-8") as f:
-        json.dump(resultado, f, ensure_ascii=False, indent=2)
-    
-    gc.collect()
-    return resultado
 
 async def processar_envio_background(legenda1: str, legenda2: str):
     global estado_envio
@@ -110,13 +90,14 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     
     estado_envio["em_andamento"] = True
     estado_envio["concluido"] = False
+    estado_envio["erro_fatal"] = False
     estado_envio["msg_final"] = ""
     estado_envio["videos"] = [{"msg": "Aguardando...", "pct": 0, "status": "progress"} for _ in buscas]
 
     app_pyro = obter_cliente_telegram()
     enviados = 0
 
-    temp_dir = os.path.join(tempfile.gettempdir(), "telegram_downloads")
+    temp_dir = os.path.join(tempfile.gettempdir(), "tg_down")
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir, ignore_errors=True)
     os.makedirs(temp_dir, exist_ok=True)
@@ -130,65 +111,50 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 termo_limpo = " ".join(termo.strip().split()).lower()
                 encontrado = False
                 
-                estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1} no canal..."
+                estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1}..."
                 estado_envio["videos"][i]["pct"] = 5
                 
-                async for msg in app_pyro.get_chat_history(canal_origem, limit=800):
+                async for msg in app_pyro.get_chat_history(canal_origem, limit=500):
                     txt = msg.caption or msg.text or ""
                     txt_limpo = " ".join(txt.strip().split()).lower()
                     
                     if txt_limpo and termo_limpo in txt_limpo:
                         if msg.video or msg.animation or msg.document:
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
+                            caminho_arquivo = os.path.join(temp_dir, f"vid_{i}.mp4")
                             
-                            # Callback de download atualiza progresso em tempo real sem travar o Event Loop
+                            last_update = time.time()
                             def cb_down(current, total):
-                                pct = 10 + int((current / total) * 45)
-                                estado_envio["videos"][i]["pct"] = pct
+                                nonlocal last_update
+                                if time.time() - last_update > 0.5:
+                                    pct = 5 + int((current / total) * 45)
+                                    estado_envio["videos"][i]["pct"] = pct
+                                    last_update = time.time()
 
-                            caminho_arquivo = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
-                            
-                            # Baixa usando a função nativa do Pyrogram
-                            await app_pyro.download_media(
-                                msg, 
-                                file_name=caminho_arquivo, 
-                                progress=cb_down
-                            )
+                            # Download oficial otimizado
+                            await app_pyro.download_media(msg, file_name=caminho_arquivo, progress=cb_down)
                             gc.collect()
 
                             try:
-                                estado_envio["videos"][i]["msg"] = "Enviando mídia limpa..."
-
-                                # Callback de upload atualiza progresso suavemente
+                                estado_envio["videos"][i]["msg"] = "Enviando mídia..."
+                                last_up = time.time()
                                 def cb_up(current, total):
-                                    pct = 55 + int((current / total) * 43)
-                                    estado_envio["videos"][i]["pct"] = pct
+                                    nonlocal last_up
+                                    if time.time() - last_up > 0.5:
+                                        pct = 50 + int((current / total) * 48)
+                                        estado_envio["videos"][i]["pct"] = pct
+                                        last_up = time.time()
 
                                 caption_enviar = msg.caption or txt
                                 
                                 if msg.video:
-                                    await app_pyro.send_video(
-                                        chat_id=canal_destino, 
-                                        video=caminho_arquivo, 
-                                        caption=caption_enviar, 
-                                        progress=cb_up
-                                    )
+                                    await app_pyro.send_video(chat_id=canal_destino, video=caminho_arquivo, caption=caption_enviar, progress=cb_up)
                                 elif msg.animation:
-                                    await app_pyro.send_animation(
-                                        chat_id=canal_destino, 
-                                        animation=caminho_arquivo, 
-                                        caption=caption_enviar, 
-                                        progress=cb_up
-                                    )
+                                    await app_pyro.send_animation(chat_id=canal_destino, animation=caminho_arquivo, caption=caption_enviar, progress=cb_up)
                                 else:
-                                    await app_pyro.send_document(
-                                        chat_id=canal_destino, 
-                                        document=caminho_arquivo, 
-                                        caption=caption_enviar, 
-                                        progress=cb_up
-                                    )
+                                    await app_pyro.send_document(chat_id=canal_destino, document=caminho_arquivo, caption=caption_enviar, progress=cb_up)
 
-                                estado_envio["videos"][i]["msg"] = "Concluído com sucesso!"
+                                estado_envio["videos"][i]["msg"] = "Concluído!"
                                 estado_envio["videos"][i]["pct"] = 100
                                 encontrado = True
                                 enviados += 1
@@ -199,13 +165,14 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             break
 
                 if not encontrado:
-                    estado_envio["videos"][i]["msg"] = "Vídeo não encontrado!"
+                    estado_envio["videos"][i]["msg"] = "Não encontrado!"
                     estado_envio["videos"][i]["status"] = "error"
                     estado_envio["videos"][i]["pct"] = 0
 
-        estado_envio["msg_final"] = f"Processo concluído! {enviados} de {total_videos} vídeo(s) enviado(s)."
+        estado_envio["msg_final"] = f"Concluído! {enviados} de {total_videos} vídeo(s) enviado(s)."
     except Exception as e:
-        estado_envio["msg_final"] = f"Erro no processo: {str(e)}"
+        estado_envio["erro_fatal"] = True
+        estado_envio["msg_final"] = f"Erro no servidor: {str(e)}"
     finally:
         estado_envio["concluido"] = True
         estado_envio["em_andamento"] = False
@@ -214,7 +181,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
 
 @app.get("/")
 def home():
-    return {"status": "API Telegram Forwarder rodando com sucesso!"}
+    return {"status": "ok"}
 
 @app.get("/legendas")
 def obter_legendas():
@@ -222,13 +189,6 @@ def obter_legendas():
         with open("legendas.json", "r", encoding="utf-8") as f:
             return json.load(f)
     return []
-
-@app.get("/varrer")
-async def varrer():
-    try:
-        return await executar_varredura()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Erro ao varrer canal: {str(e)}")
 
 @app.get("/status_progresso")
 def status_progresso():
@@ -243,4 +203,4 @@ async def enviar(payload: EnvioPayload, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Já existe um envio em andamento.")
 
     background_tasks.add_task(processar_envio_background, payload.legenda1, payload.legenda2)
-    return {"status": "iniciado"}
+    return {"status": "iniciado", "server_id": SERVER_RUN_ID}
