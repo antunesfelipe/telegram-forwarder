@@ -197,7 +197,9 @@ async def varrer_canal():
     try:
         async with app_pyro:
             canal_origem = await resolver_canal(app_pyro, os.environ.get("CANAL_ORIGEM", ""))
-            async for msg in app_pyro.get_chat_history(canal_origem, limit=300):
+            
+            # Limite alterado de 300 para 1500 mensagens
+            async for msg in app_pyro.get_chat_history(canal_origem, limit=1500):
                 txt = msg.caption or msg.text or ""
                 txt_limpo = " ".join(txt.strip().split())
                 if txt_limpo and txt_limpo not in legendas:
