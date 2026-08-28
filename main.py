@@ -134,24 +134,44 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                         break
                         
                         if msg_video:
+                            # Tenta descobrir o tamanho total do arquivo
+                            tamanho_total = getattr(msg_video.video or msg_video.document or msg_video.animation, "file_size", 0)
+                            
+                            # Checagem de espaço livre no disco antes de baixar
+                            espaco_livre = shutil.disk_usage(temp_dir).free
+                            if tamanho_total > 0 and espaco_livre < tamanho_total:
+                                raise Exception(f"Sem espaço em disco! Necessário: {tamanho_total // (1024**2)}MB, Livre: {espaco_livre // (1024**2)}MB")
+
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             caminho_arquivo = os.path.join(temp_dir, f"vid_{i}.mp4")
                             
                             last_update = time.time()
-                            def cb_down(current, total):
-                                nonlocal last_update
-                                if time.time() - last_update > 0.5:
-                                    pct = 5 + int((current / total) * 45)
-                                    estado_envio["videos"][i]["pct"] = pct
-                                    last_update = time.time()
+                            bytes_baixados = 0
+                            bytes_desde_ultimo_gc = 0
 
-                            # Download via Stream diretamente no disco para não estourar a RAM
+                            # Download via Stream diretamente no disco sem esgotar RAM
                             with open(caminho_arquivo, "wb") as f:
                                 async for chunk in app_pyro.stream_media(msg_video):
                                     f.write(chunk)
-                                    # Força liberação de memória RAM acumulada a cada bloco
-                                    gc.collect()
+                                    len_chunk = len(chunk)
+                                    bytes_baixados += len_chunk
+                                    bytes_desde_ultimo_gc += len_chunk
 
+                                    # Atualiza barra de progresso do Front-End
+                                    if time.time() - last_update > 0.5:
+                                        if tamanho_total > 0:
+                                            pct = 5 + int((bytes_baixados / tamanho_total) * 45)
+                                        else:
+                                            pct = 25
+                                        estado_envio["videos"][i]["pct"] = pct
+                                        last_update = time.time()
+
+                                    # Só força limpeza da RAM a cada 50MB gravados (evita lentidão por GC em excesso)
+                                    if bytes_desde_ultimo_gc >= 52428800:
+                                        gc.collect()
+                                        bytes_desde_ultimo_gc = 0
+
+                            gc.collect() # Limpeza final do download
                             estado_envio["videos"][i]["pct"] = 50
 
                             try:
