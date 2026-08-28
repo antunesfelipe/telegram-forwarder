@@ -49,13 +49,12 @@ def obter_cliente_telegram():
     api_id = int(os.environ["API_ID"])
     api_hash = os.environ["API_HASH"]
     session = os.environ["TELEGRAM_SESSION"]
-    # Configurado para limitar o uso de memória interna do cliente Telegram
     return Client(
         "user_session", 
         api_id=api_id, 
         api_hash=api_hash, 
         session_string=session,
-        max_concurrent_transfers=1 # Força 1 transferência por vez para economizar RAM
+        max_concurrent_transfers=1
     )
 
 def resolver_chat_id(valor: str):
@@ -83,7 +82,7 @@ async def executar_varredura():
     with open("legendas.json", "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=2)
     
-    gc.collect() # Libera RAM após varredura
+    gc.collect()
     return resultado
 
 async def processar_envio_background(legenda1: str, legenda2: str):
@@ -107,23 +106,26 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     try:
         async with app_pyro:
             for i, termo in enumerate(buscas):
+                termo_limpo = " ".join(termo.strip().split()).lower()
                 encontrado = False
                 
-                # Busca direta otimizada
-                async for msg in app_pyro.search_messages(canal_origem, query=termo, limit=5):
-                    txt = msg.caption or msg.text
-                    if txt and termo.lower() in txt.lower():
-                        msg_video = msg if (msg.video or msg.animation) else None
-                        
-                        if msg_video:
+                estado_envio["videos"][i]["msg"] = "Buscando mídia no canal..."
+                
+                # Varrer as últimas 200 mensagens previne travamentos da API e falhas por espaço extra
+                async for msg in app_pyro.get_chat_history(canal_origem, limit=200):
+                    txt = msg.caption or msg.text or ""
+                    txt_limpo = " ".join(txt.strip().split()).lower()
+                    
+                    if txt_limpo and termo_limpo in txt_limpo:
+                        if msg.video or msg.animation or msg.document:
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             
                             def progress_down(current, total):
                                 pct = int((current / total) * 50)
                                 estado_envio["videos"][i]["pct"] = pct
 
-                            caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg_video.id}.mp4")
-                            file_path = await app_pyro.download_media(msg_video, file_name=caminho_destino, progress=progress_down)
+                            caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
+                            file_path = await app_pyro.download_media(msg, file_name=caminho_destino, progress=progress_down)
                             
                             try:
                                 estado_envio["videos"][i]["msg"] = "Enviando mídia..."
@@ -132,11 +134,12 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                     pct = 50 + int((current / total) * 50)
                                     estado_envio["videos"][i]["pct"] = pct
 
-                                # Envia como documento para reduzir o consumo do processador do Render na conversão
-                                if msg_video.video:
-                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=txt, progress=progress_up)
+                                if msg.video:
+                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=msg.caption or "", progress=progress_up)
+                                elif msg.animation:
+                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=msg.caption or "", progress=progress_up)
                                 else:
-                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=txt, progress=progress_up)
+                                    await app_pyro.send_document(chat_id=canal_destino, document=file_path, caption=msg.caption or "", progress=progress_up)
 
                                 estado_envio["videos"][i]["msg"] = "Concluído com sucesso!"
                                 estado_envio["videos"][i]["pct"] = 100
@@ -145,12 +148,13 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             finally:
                                 if file_path and os.path.exists(file_path):
                                     os.remove(file_path)
-                                gc.collect() # Força limpeza da memória após cada vídeo
+                                gc.collect()
                             break
 
                 if not encontrado:
                     estado_envio["videos"][i]["msg"] = "Vídeo não encontrado!"
                     estado_envio["videos"][i]["status"] = "error"
+                    estado_envio["videos"][i]["pct"] = 0
 
         estado_envio["msg_final"] = f"Processo concluído! {enviados} de {total_videos} vídeo(s) enviado(s)."
     except Exception as e:
