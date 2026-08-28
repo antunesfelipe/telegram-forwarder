@@ -38,9 +38,8 @@ async def resolver_chat_seguro(app, identificador):
 
 async def buscar_e_enviar_video(app, chat_origem_obj, chat_destino_obj, legenda_busca):
     termo_alvo = normalizar_texto(legenda_busca)
-    print(f"\n⚡ [TURBO] Buscando instantaneamente no Telegram: \"{legenda_busca}\"...", flush=True)
+    print(f"\n⚡ [TURBO] Buscando instantaneamente: \"{legenda_busca}\"...", flush=True)
 
-    # 1. Tenta a BUSCA DIRETA do Telegram (MUITO MAIS RÁPIDA)
     mensagens_encontradas = []
     try:
         async for m in app.search_messages(chat_origem_obj.id, query=legenda_busca, limit=20):
@@ -48,15 +47,11 @@ async def buscar_e_enviar_video(app, chat_origem_obj, chat_destino_obj, legenda_
     except Exception as e:
         print(f"Aviso na busca direta: {e}", flush=True)
 
-    # 2. Se a busca direta retornar resultados, analisa eles primeiro
     for msg_alvo in mensagens_encontradas:
-        # Se a mensagem achada for o próprio vídeo
         if msg_alvo.video:
             leg = msg_alvo.caption or legenda_busca
             print(f"🎯 Vídeo Encontrado Direto! ID: {msg_alvo.id}", flush=True)
             return await baixar_e_enviar(app, chat_origem_obj, chat_destino_obj, msg_alvo, leg)
-
-        # Se for um texto ou foto, procura o vídeo mais próximo (ID + 1 ou ID + 2)
         else:
             ids_proximos = [msg_alvo.id + 1, msg_alvo.id + 2, msg_alvo.id - 1]
             for pid in ids_proximos:
@@ -68,8 +63,7 @@ async def buscar_e_enviar_video(app, chat_origem_obj, chat_destino_obj, legenda_
                 except Exception:
                     continue
 
-    # 3. Fallback rápido: Varre apenas os últimos 300 vídeos se a busca exata falhar
-    print("⚠️ Busca direta não achou exato. Fazendo varredura rápida nos últimos vídeos...", flush=True)
+    print("⚠️ Busca direta não achou. Varrendo os vídeos recentes...", flush=True)
     async for msg in app.get_chat_history(chat_origem_obj.id, limit=300):
         if not msg.video: continue
 
@@ -85,7 +79,7 @@ async def buscar_e_enviar_video(app, chat_origem_obj, chat_destino_obj, legenda_
             except Exception: pass
 
         if legenda_extraida and termo_alvo in normalizar_texto(legenda_extraida):
-            print(f"🎯 Vídeo Encontrado no histórico! ID: {msg.id}", flush=True)
+            print(f"🎯 Vídeo Encontrado! ID: {msg.id}", flush=True)
             return await baixar_e_enviar(app, chat_origem_obj, chat_destino_obj, msg, legenda_extraida)
 
     return False
