@@ -196,9 +196,7 @@
 <script>
     const REPO_OWNER = 'antunesfelipe';           
     const REPO_NAME = 'telegram-forwarder';
-    
-    // ⚠️ SUBSTITUA COM A URL QUE A RENDER GERAR PARA VOCÊ:
-    const RENDER_API_URL = 'const RENDER_API_URL = 'https://telegram-forwarder-t7uc.onrender.com';';
+    const RENDER_API_URL = 'https://telegram-forwarder-t7uc.onrender.com';
 
     let legendasCanal = [];
 
@@ -253,7 +251,7 @@
             const res = await fetch(`${RENDER_API_URL}/varrer`);
             if (res.ok) {
                 atualizarStatus('⚡ Varredura iniciada em segundo plano! Aguarde 15-30s e recarregue a lista.', 'success');
-                setTimeout(carregarLegendasJSON, 20000); // Tenta atualizar a lista após 20 segundos
+                setTimeout(carregarLegendasJSON, 20000);
             } else {
                 atualizarStatus('❌ Falha ao iniciar varredura na Render.', 'failure');
             }
