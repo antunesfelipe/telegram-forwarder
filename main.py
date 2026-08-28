@@ -1,25 +1,59 @@
-from fastapi import FastAPI, BackgroundTasks
-import os, json, asyncio
+import asyncio
+# Corrige o problema de event loop do Pyrogram no startup da Render
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+import os
+import json
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from pyrogram import Client
 
 app = FastAPI()
 
-async def executar_varredura():
+# Permite que o seu site no GitHub Pages faça requisições para a Render sem erro de CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class EnvioPayload(BaseModel):
+    legenda1: str = ""
+    legenda2: str = ""
+
+# Funções Auxiliares
+def obter_cliente_telegram():
     api_id = int(os.environ["API_ID"])
     api_hash = os.environ["API_HASH"]
-    canal_origem = os.environ["CANAL_ORIGEM"].strip()
     session = os.environ["TELEGRAM_SESSION"]
+    return Client("user_session", api_id=api_id, api_hash=api_hash, session_string=session)
 
-    app_pyro = Client("user_session", api_id=api_id, api_hash=api_hash, session_string=session)
+def resolver_chat_id(valor: str):
+    valor = valor.strip()
+    if valor.startswith("-") and valor[1:].isdigit():
+        return int(valor)
+    if valor.isdigit():
+        return int(valor)
+    return valor
+
+async def executar_varredura():
+    canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
+    app_pyro = obter_cliente_telegram()
     legendas = set()
 
     async with app_pyro:
-        chat_id = int(canal_origem) if canal_origem.replace("-", "").isdigit() else canal_origem
-        
-        async for dialog in app_pyro.get_dialogs(limit=100):
+        # Carrega os diálogos para esquentar o cache de conversas do Pyrogram
+        async for _ in app_pyro.get_dialogs(limit=100):
             pass
 
-        async for msg in app_pyro.get_chat_history(chat_id, limit=3000):
+        # Varrer até 5.000 mensagens
+        async for msg in app_pyro.get_chat_history(canal_origem, limit=5000):
             txt = msg.caption or msg.text
             if txt:
                 primeira_linha = txt.strip().split('\n')[0].strip()
@@ -27,10 +61,49 @@ async def executar_varredura():
                     legendas.add(primeira_linha)
 
     resultado = sorted(list(legendas))
+    
+    # Salva localmente
     with open("legendas.json", "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=2)
+
+async def executar_envio(legenda1: str, legenda2: str):
+    canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
+    canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
+    
+    buscas = [l for l in [legenda1, legenda2] if l]
+    app_pyro = obter_cliente_telegram()
+
+    async with app_pyro:
+        async for _ in app_pyro.get_dialogs(limit=100):
+            pass
+
+        for termo in buscas:
+            encontrado = False
+            async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
+                txt = msg.caption or msg.text
+                if txt and termo.lower() in txt.lower():
+                    # Copia a mídia/mensagem para o canal de destino
+                    await msg.copy(canal_destino)
+                    encontrado = True
+                    break
+            
+            if not encontrado:
+                print(f"Alerta: Nenhuma mídia encontrada para a legenda: {termo}")
+
+# Rotas da API
+@app.get("/")
+def home():
+    return {"status": "API Telegram Forwarder rodando com sucesso!"}
 
 @app.get("/varrer")
 def varrer(background_tasks: BackgroundTasks):
     background_tasks.add_task(executar_varredura)
     return {"status": "Varredura iniciada em segundo plano!"}
+
+@app.post("/enviar")
+async def enviar(payload: EnvioPayload, background_tasks: BackgroundTasks):
+    if not payload.legenda1 and not payload.legenda2:
+        raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
+
+    background_tasks.add_task(executar_envio, payload.legenda1, payload.legenda2)
+    return {"status": "Envio processado em segundo plano!"}
