@@ -78,6 +78,7 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
     canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
     canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
     buscas = [l for l in [legenda1, legenda2] if l]
+    total_videos = len(buscas)
     
     app_pyro = obter_cliente_telegram()
     enviados = 0
@@ -86,10 +87,10 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
         async for _ in app_pyro.get_dialogs(limit=200):
             pass
 
-        yield f"data: {json.dumps({'status': 'info', 'msg': 'Buscando vídeos no canal...'})}\n\n"
+        yield f"data: {json.dumps({'status': 'info', 'msg': 'Iniciando busca no canal...'})}\n\n"
         await asyncio.sleep(0.1)
 
-        for termo in buscas:
+        for i, termo in enumerate(buscas):
             encontrado = False
             mensagens = []
             
@@ -110,36 +111,37 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
                             msg_video = msg_seguinte
 
                     if msg_video:
-                        yield f"data: {json.dumps({'status': 'info', 'msg': f'Baixando mídia para: {termo}...'})}\n\n"
+                        msg_status = "Baixando mídia do Telegram..."
+                        yield f"data: {json.dumps({'status': 'info_video', 'index': i, 'msg': msg_status})}\n\n"
                         await asyncio.sleep(0.1)
                         
                         queue = asyncio.Queue()
 
-                        # Progress callback que joga dados na fila sem travar a execução
-                        def progress(current, total):
-                            pct = int((current / total) * 50) # 0-50% para download
+                        # Progresso do Download (0% a 50% na barra do vídeo "i")
+                        def progress_down(current, total):
+                            pct = int((current / total) * 50)
                             queue.put_nowait(pct)
 
-                        # Inicia o download em background task
                         download_task = asyncio.create_task(
-                            app_pyro.download_media(msg_video, progress=progress)
+                            app_pyro.download_media(msg_video, progress=progress_down)
                         )
 
-                        # Envia os eventos de porcentagem enquanto o arquivo baixa
                         while not download_task.done() or not queue.empty():
                             while not queue.empty():
                                 pct = queue.get_nowait()
-                                yield f"data: {json.dumps({'status': 'progress', 'pct': pct, 'termo': termo})}\n\n"
+                                yield f"data: {json.dumps({'status': 'progress', 'index': i, 'pct': pct})}\n\n"
                             await asyncio.sleep(0.1)
 
                         file_path = await download_task
                         
                         try:
-                            yield f"data: {json.dumps({'status': 'info', 'msg': f'Enviando mídia para canal destino...'})}\n\n"
+                            msg_status = "Enviando mídia para destino..."
+                            yield f"data: {json.dumps({'status': 'info_video', 'index': i, 'msg': msg_status})}\n\n"
                             await asyncio.sleep(0.1)
 
+                            # Progresso do Upload (50% a 100% na barra do vídeo "i")
                             def progress_up(current, total):
-                                pct = 50 + int((current / total) * 50) # 50-100% para upload
+                                pct = 50 + int((current / total) * 50)
                                 queue.put_nowait(pct)
 
                             if msg_video.video:
@@ -151,15 +153,15 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
                                     app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=legenda_texto, progress=progress_up)
                                 )
 
-                            # Envia os eventos de porcentagem enquanto o arquivo sobe
                             while not upload_task.done() or not queue.empty():
                                 while not queue.empty():
                                     pct = queue.get_nowait()
-                                    yield f"data: {json.dumps({'status': 'progress', 'pct': pct, 'termo': termo})}\n\n"
+                                    yield f"data: {json.dumps({'status': 'progress', 'index': i, 'pct': pct})}\n\n"
                                 await asyncio.sleep(0.1)
 
                             await upload_task
                             
+                            yield f"data: {json.dumps({'status': 'info_video', 'index': i, 'msg': 'Concluído com sucesso!'})}\n\n"
                             encontrado = True
                             enviados += 1
                         finally:
@@ -168,9 +170,9 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
                         break
 
             if not encontrado:
-                yield f"data: {json.dumps({'status': 'error', 'msg': f'Vídeo não encontrado para: {termo}'})}\n\n"
+                yield f"data: {json.dumps({'status': 'error_video', 'index': i, 'msg': f'Vídeo não encontrado!'})}\n\n"
 
-    yield f"data: {json.dumps({'status': 'done', 'msg': f'Processo concluído! {enviados} vídeo(s) enviado(s).'})}\n\n"
+    yield f"data: {json.dumps({'status': 'done', 'msg': f'Processo concluído! {enviados} de {total_videos} vídeo(s) enviado(s).'})}\n\n"
 
 # Rotas
 @app.get("/")
@@ -179,21 +181,4 @@ def home():
 
 @app.get("/legendas")
 def obter_legendas():
-    if os.path.exists("legendas.json"):
-        with open("legendas.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-@app.get("/varrer")
-async def varrer():
-    return await executar_varredura()
-
-@app.post("/enviar")
-async def enviar(payload: EnvioPayload):
-    if not payload.legenda1 and not payload.legenda2:
-        raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
-
-    return StreamingResponse(
-        executar_envio_stream(payload.legenda1, payload.legenda2),
-        media_type="text/event-stream"
-    )
+    if os
