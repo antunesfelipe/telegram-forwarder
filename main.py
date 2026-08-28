@@ -18,7 +18,6 @@ from pyrogram import Client
 
 gc.set_threshold(50, 5, 5)
 
-# ID único do processo pra o front saber se o server reiniciou
 SERVER_RUN_ID = str(int(time.time()))
 
 estado_envio = {
@@ -114,7 +113,6 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1}..."
                 estado_envio["videos"][i]["pct"] = 5
                 
-                # Coleta até 1500 mensagens do histórico
                 mensagens = [m async for m in app_pyro.get_chat_history(canal_origem, limit=1500)]
                 
                 for index, msg in enumerate(mensagens):
@@ -125,10 +123,8 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                         msg_video = None
                         caption_enviar = txt
 
-                        # 1. Checa se a própria mensagem encontrada é um vídeo/documento
                         if msg.video or msg.animation or msg.document:
                             msg_video = msg
-                        # 2. Se for apenas imagem/texto (capa), verifica as mensagens seguintes (abaixo)
                         else:
                             for offset in range(1, 4):
                                 if index - offset >= 0:
@@ -149,8 +145,14 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                     estado_envio["videos"][i]["pct"] = pct
                                     last_update = time.time()
 
-                            await app_pyro.download_media(msg_video, file_name=caminho_arquivo, progress=cb_down)
-                            gc.collect()
+                            # Download via Stream diretamente no disco para não estourar a RAM
+                            with open(caminho_arquivo, "wb") as f:
+                                async for chunk in app_pyro.stream_media(msg_video):
+                                    f.write(chunk)
+                                    # Força liberação de memória RAM acumulada a cada bloco
+                                    gc.collect()
+
+                            estado_envio["videos"][i]["pct"] = 50
 
                             try:
                                 estado_envio["videos"][i]["msg"] = "Enviando mídia..."
