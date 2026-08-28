@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Coleta agressiva de memória
-gc.set_threshold(100, 5, 5)
+# Configuração agressiva do Garbage Collector
+gc.set_threshold(50, 5, 5)
 
 estado_envio = {
     "em_andamento": False,
@@ -142,38 +142,36 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             estado_envio["videos"][i]["pct"] = 10
                             
-                            # Atualiza progresso de download sem trava de CPU
-                            def progress_down(current, total):
-                                pct = 10 + int((current / total) * 45)
-                                estado_envio["videos"][i]["pct"] = pct
+                            caminho_arquivo = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
+                            
+                            # Stream de download gravando direto em disco para poupar RAM
+                            with open(caminho_arquivo, "wb") as f:
+                                async for chunk in app_pyro.stream_media(msg):
+                                    f.write(chunk)
+                                    # Desaloca blocos de memória imediatamente
+                                    del chunk
 
-                            caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
-                            file_path = await app_pyro.download_media(msg, file_name=caminho_destino, progress=progress_down)
                             gc.collect()
 
                             try:
-                                estado_envio["videos"][i]["msg"] = "Enviando mídia..."
-
-                                # Atualiza progresso de envio sem trava de CPU
-                                def progress_up(current, total):
-                                    pct = 55 + int((current / total) * 43)
-                                    estado_envio["videos"][i]["pct"] = pct
+                                estado_envio["videos"][i]["msg"] = "Enviando como nova postagem..."
+                                estado_envio["videos"][i]["pct"] = 60
 
                                 caption_enviar = msg.caption or txt
                                 if msg.video:
-                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=caption_enviar, progress=progress_up)
+                                    await app_pyro.send_video(chat_id=canal_destino, video=caminho_arquivo, caption=caption_enviar)
                                 elif msg.animation:
-                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=caption_enviar, progress=progress_up)
+                                    await app_pyro.send_animation(chat_id=canal_destino, animation=caminho_arquivo, caption=caption_enviar)
                                 else:
-                                    await app_pyro.send_document(chat_id=canal_destino, document=file_path, caption=caption_enviar, progress=progress_up)
+                                    await app_pyro.send_document(chat_id=canal_destino, document=caminho_arquivo, caption=caption_enviar)
 
                                 estado_envio["videos"][i]["msg"] = "Concluído com sucesso!"
                                 estado_envio["videos"][i]["pct"] = 100
                                 encontrado = True
                                 enviados += 1
                             finally:
-                                if file_path and os.path.exists(file_path):
-                                    os.remove(file_path)
+                                if os.path.exists(caminho_arquivo):
+                                    os.remove(caminho_arquivo)
                                 gc.collect()
                             break
 
