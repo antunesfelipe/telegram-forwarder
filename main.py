@@ -15,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Limite agressivo para desalocar memória RAM no Render
 gc.set_threshold(100, 5, 5)
 
 estado_envio = {
@@ -57,12 +56,12 @@ def obter_cliente_telegram():
     )
 
 async def resolver_canal(app_pyro: Client, valor: str):
-    """ Resolve o canal aceitando ID numérico (-100...), username (@) ou link (t.me) """
+    """ Garante a resolução do canal numérico mesmo em instâncias novas do Render """
     valor_str = str(valor).strip()
     if not valor_str:
-        raise ValueError("A variável de ambiente do canal não foi configurada.")
+        raise ValueError("Variável do canal não configurada.")
         
-    # Se for link ou @username, resolve direto
+    # Se for link ou @username
     if "t.me/" in valor_str or valor_str.startswith("@"):
         chat = await app_pyro.get_chat(valor_str)
         return chat.id
@@ -70,16 +69,21 @@ async def resolver_canal(app_pyro: Client, valor: str):
     # Se for ID numérico (ex: -100...)
     if valor_str.startswith("-") and valor_str[1:].isdigit():
         chat_id = int(valor_str)
+        # 1. Tenta pegar direto se já estiver em cache
         try:
             chat = await app_pyro.get_chat(chat_id)
             return chat.id
         except Exception:
-            # Varre os diálogos do usuário para popular o cache de peers da sessão
-            async for dialog in app_pyro.get_dialogs(limit=200):
-                if dialog.chat.id == chat_id:
-                    return dialog.chat.id
-            return chat_id
-            
+            pass
+
+        # 2. Força o Pyrogram a baixar os canais da conta para encontrar o ID
+        async for dialog in app_pyro.get_dialogs(limit=500):
+            if dialog.chat.id == chat_id:
+                return dialog.chat.id
+        
+        # Se não achou na lista de chats do usuário, retorna o ID puro como tentativa
+        return chat_id
+
     return valor_str
 
 async def executar_varredura():
