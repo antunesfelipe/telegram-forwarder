@@ -53,7 +53,7 @@
             color: #aaa; 
             font-weight: 600; 
         }
-        textarea, input[type="text"], input[type="password"] { 
+        textarea, input[type="text"] { 
             width: 100%; 
             padding: 12px; 
             border-radius: 8px; 
@@ -64,7 +64,7 @@
             outline: none;
             transition: border-color 0.2s;
         }
-        textarea:focus, input[type="text"]:focus, input[type="password"]:focus {
+        textarea:focus, input[type="text"]:focus {
             border-color: #0088cc;
         }
         textarea { height: 60px; resize: vertical; }
@@ -82,8 +82,6 @@
         .btn-send { background: #0088cc; color: white; flex: 1; }
         .btn-send:hover { background: #006699; }
         .btn-send:disabled { background: #444; cursor: not-allowed; opacity: 0.6; }
-        .btn-cancel { background: #d32f2f; color: white; display: none; }
-        .btn-cancel:hover { background: #9a0007; }
 
         .btn-action { 
             background: #2a2a32; 
@@ -159,10 +157,7 @@
         <h2>🚀 Telegram Forwarder</h2>
     </div>
 
-    <label for="ghToken">🔑 Seu GitHub Personal Token:</label>
-    <input type="password" id="ghToken" placeholder="Cole seu novo token aqui (github_pat_...)" onchange="salvarToken()">
-
-    <div class="section-box">
+    <div class="section-box" style="margin-top: 0; border: none; padding-top: 0;">
         <div class="section-header">
             <span class="section-title">🔍 Canal de Origem</span>
             <button class="btn-action" onclick="forcarVarreduraCanal()">🔄 Forçar Varredura</button>
@@ -182,8 +177,7 @@
     <textarea id="legenda2" placeholder="Selecione acima ou cole a legenda aqui..."></textarea>
 
     <div class="btn-group">
-        <button class="btn-send" id="btnSend" onclick="dispararActions()">Enviar Vídeo(s)</button>
-        <button class="btn-cancel" id="btnCancel" onclick="cancelarRun()">Parar Execução</button>
+        <button class="btn-send" id="btnSend" onclick="enviarMidia()">Enviar Vídeo(s)</button>
     </div>
 
     <div id="status-box"></div>
@@ -202,28 +196,16 @@
 <script>
     const REPO_OWNER = 'antunesfelipe';           
     const REPO_NAME = 'telegram-forwarder';
-    const WORKFLOW_ID = 'transferir.yml';
+    
+    // ⚠️ SUBSTITUA COM A URL QUE A RENDER GERAR PARA VOCÊ:
+    const RENDER_API_URL = 'https://SEU-APP-AQUI.onrender.com';
 
     let legendasCanal = [];
-    let currentRunId = null;
-    let pollInterval = null;
-    let modoVarredura = false;
 
     window.onload = () => {
-        const tokenSalvo = localStorage.getItem('gh_token') || '';
-        document.getElementById('ghToken').value = tokenSalvo;
         carregarLegendasJSON();
         carregarHistorico();
     };
-
-    function salvarToken() {
-        const token = document.getElementById('ghToken').value.trim();
-        localStorage.setItem('gh_token', token);
-    }
-
-    function obterToken() {
-        return document.getElementById('ghToken').value.trim() || localStorage.getItem('gh_token') || '';
-    }
 
     async function carregarLegendasJSON() {
         try {
@@ -265,121 +247,50 @@
     }
 
     async function forcarVarreduraCanal() {
-        const token = obterToken();
-        if (!token) return atualizarStatus('Por favor, insira o seu GitHub Personal Token acima!', 'failure');
-
-        modoVarredura = true;
-        atualizarStatus('⏳ Solicitando varredura ao GitHub...', 'in_progress');
+        atualizarStatus('⏳ Solicitando varredura à Render...', 'in_progress');
         
         try {
-            const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/vnd.github+json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ ref: 'main', inputs: { legenda_busca: '' } })
-            });
-
-            if (res.status === 204) {
-                setTimeout(monitorarStatus, 3000);
+            const res = await fetch(`${RENDER_API_URL}/varrer`);
+            if (res.ok) {
+                atualizarStatus('⚡ Varredura iniciada em segundo plano! Aguarde 15-30s e recarregue a lista.', 'success');
+                setTimeout(carregarLegendasJSON, 20000); // Tenta atualizar a lista após 20 segundos
             } else {
-                const err = await res.json().catch(() => ({}));
-                atualizarStatus(`Erro (${res.status}): ${err.message || 'Verifique se o token é válido.'}`, 'failure');
+                atualizarStatus('❌ Falha ao iniciar varredura na Render.', 'failure');
             }
         } catch (e) {
-            atualizarStatus('Erro de conexão com o GitHub.', 'failure');
+            atualizarStatus('❌ Erro ao conectar com o servidor Render.', 'failure');
         }
     }
 
-    async function dispararActions() {
-        const token = obterToken();
-        if (!token) return atualizarStatus('Por favor, insira o seu GitHub Personal Token acima!', 'failure');
-
-        modoVarredura = false;
+    async function enviarMidia() {
         const leg1 = document.getElementById('legenda1').value.trim();
         const leg2 = document.getElementById('legenda2').value.trim();
 
         if (!leg1 && !leg2) return atualizarStatus('Informe ao menos uma legenda!', 'failure');
 
-        const legendaFinal = leg2 ? `${leg1} ||| ${leg2}` : leg1;
-        atualizarStatus('⏳ Conectando ao GitHub Actions...', 'in_progress');
+        atualizarStatus('⏳ Processando e enviando mídia via Telegram...', 'in_progress');
         document.getElementById('btnSend').disabled = true;
 
         try {
-            const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`, {
+            const res = await fetch(`${RENDER_API_URL}/enviar`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/vnd.github+json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ ref: 'main', inputs: { legenda_busca: legendaFinal } })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ legenda1: leg1, legenda2: leg2 })
             });
 
-            if (res.status === 204) {
-                setTimeout(monitorarStatus, 4000);
+            const data = await res.json();
+
+            if (res.ok) {
+                atualizarStatus('✅ Vídeo(s) processado(s) com sucesso!', 'success');
+                salvarHistorico();
             } else {
-                const err = await res.json().catch(() => ({}));
-                atualizarStatus(`Erro (${res.status}): ${err.message || 'Falha ao autorizar.'}`, 'failure');
-                document.getElementById('btnSend').disabled = false;
+                atualizarStatus(`❌ Erro: ${data.detail || 'Falha ao enviar mídias.'}`, 'failure');
             }
         } catch (e) {
-            atualizarStatus('Erro de conexão.', 'failure');
+            atualizarStatus('❌ Erro de conexão com o servidor Render.', 'failure');
+        } finally {
             document.getElementById('btnSend').disabled = false;
         }
-    }
-
-    async function monitorarStatus() {
-        const token = obterToken();
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs?workflow_id=${WORKFLOW_ID}&per_page=1`;
-
-        try {
-            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-            const data = await res.json();
-            
-            if (data.workflow_runs && data.workflow_runs.length > 0) {
-                const latestRun = data.workflow_runs[0];
-                currentRunId = latestRun.id;
-
-                if (latestRun.status === 'in_progress' || latestRun.status === 'queued') {
-                    const msg = modoVarredura ? '⏳ Indexando legendas do Telegram...' : '⏳ Buscando e enviando mídia...';
-                    atualizarStatus(`${msg} (${latestRun.status})`, 'in_progress');
-                    document.getElementById('btnCancel').style.display = 'block';
-                    pollInterval = setTimeout(monitorarStatus, 3000);
-                } else if (latestRun.status === 'completed') {
-                    document.getElementById('btnCancel').style.display = 'none';
-                    document.getElementById('btnSend').disabled = false;
-                    
-                    if (latestRun.conclusion === 'success') {
-                        if (modoVarredura) {
-                            atualizarStatus('✅ Legendas atualizadas com sucesso!', 'success');
-                            carregarLegendasJSON();
-                        } else {
-                            atualizarStatus('✅ Vídeo(s) enviado(s) com sucesso!', 'success');
-                            salvarHistorico();
-                        }
-                    } else {
-                        atualizarStatus(`❌ Ocorreu um erro no script Python.`, 'failure');
-                    }
-                }
-            }
-        } catch (e) { console.error(e); }
-    }
-
-    async function cancelarRun() {
-        const token = obterToken();
-        if (!currentRunId) return;
-        atualizarStatus('⏳ Cancelando execução...', 'in_progress');
-        await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${currentRunId}/cancel`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        clearTimeout(pollInterval);
-        atualizarStatus('🛑 Execução cancelada.', 'failure');
-        document.getElementById('btnCancel').style.display = 'none';
-        document.getElementById('btnSend').disabled = false;
     }
 
     function atualizarStatus(msg, tipo) {
