@@ -8,6 +8,7 @@ import os
 import json
 import tempfile
 import gc
+import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,13 +58,22 @@ def obter_cliente_telegram():
     )
 
 def resolver_chat_id(valor: str):
-    valor = str(valor).strip()
-    # Converte string numérica para inteiro para o Pyrogram reconhecer
-    if valor.startswith("-") and valor[1:].isdigit():
-        return int(valor)
-    if valor.isdigit():
-        return int(valor)
-    return valor
+    """ Sanatiza e corrige IDs de canais/supergrupos do Telegram """
+    valor_str = str(valor).strip()
+    
+    # Se for ID negativo numérico
+    if valor_str.startswith("-"):
+        numeros = re.sub(r"\D", "", valor_str)
+        # IDs de canais/grupos no Telegram costumam ter 13 dígitos (-100 + 10 dígitos)
+        # Se vier com -1003... de 14 dígitos por erro de digitação, corrige para -100...
+        if valor_str.startswith("-1003") and len(numeros) == 13:
+            valor_str = "-100" + numeros[4:]
+        return int(valor_str)
+        
+    if valor_str.isdigit():
+        return int(valor_str)
+        
+    return valor_str
 
 async def executar_varredura():
     canal_origem = resolver_chat_id(os.environ.get("CANAL_ORIGEM", ""))
@@ -90,8 +100,8 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     canal_origem = resolver_chat_id(os.environ.get("CANAL_ORIGEM", ""))
     canal_destino = resolver_chat_id(os.environ.get("CANAL_DESTINO", ""))
     
-    # Processa Vídeo 1 e Vídeo 2 caso informados
-    buscas = [l for l in [legenda1, legenda2] if l.strip()]
+    # Captura tanto o Vídeo 1 quanto o Vídeo 2 (se fornecido)
+    buscas = [l for l in [legenda1, legenda2] if l and l.strip()]
     total_videos = len(buscas)
     
     estado_envio["em_andamento"] = True
@@ -114,7 +124,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                 estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1} no canal..."
                 estado_envio["videos"][i]["pct"] = 10
                 
-                # Varrer as mensagens buscando a legenda correspondente
+                # Iteração direta limitada
                 async for msg in app_pyro.get_chat_history(canal_origem, limit=500):
                     txt = msg.caption or msg.text or ""
                     txt_limpo = " ".join(txt.strip().split()).lower()
@@ -185,7 +195,7 @@ async def varrer():
     try:
         return await executar_varredura()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao varrer canal: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Falha na varredura (Verifique o ID do Canal): {str(e)}")
 
 @app.get("/status_progresso")
 def status_progresso():
