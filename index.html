@@ -8,10 +8,11 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: #1e1e1e; padding: 25px; border-radius: 12px; width: 100%; max-width: 520px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
         .logo-container { text-align: center; margin-bottom: 15px; }
-        .logo-container img { max-width: 120px; max-height: 80px; object-fit: contain; }
+        .logo-container img { max-width: 130px; max-height: 90px; object-fit: contain; }
         h2 { margin-top: 0; color: #0088cc; font-size: 20px; text-align: center; }
         label { display: block; margin-top: 15px; margin-bottom: 5px; font-size: 13px; color: #ccc; font-weight: bold; }
-        textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 13px; box-sizing: border-box; height: 50px; resize: vertical; }
+        textarea, input[type="text"] { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 13px; box-sizing: border-box; }
+        textarea { height: 50px; resize: vertical; }
         
         .btn-group { display: flex; gap: 10px; margin-top: 20px; }
         button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; }
@@ -19,7 +20,7 @@
         .btn-send:hover { background: #006699; }
         .btn-cancel { background: #d32f2f; color: white; display: none; }
         .btn-cancel:hover { background: #9a0007; }
-        .btn-action { background: #333; color: #fff; padding: 4px 8px; font-size: 11px; border-radius: 4px; border: 1px solid #444; }
+        .btn-action { background: #333; color: #fff; padding: 5px 8px; font-size: 11px; border-radius: 4px; border: 1px solid #444; cursor: pointer; }
         .btn-action:hover { background: #0088cc; border-color: #0088cc; }
         
         #status-box { margin-top: 20px; padding: 12px; border-radius: 8px; text-align: center; font-size: 13px; font-weight: bold; background: #2a2a2a; display: none; }
@@ -31,29 +32,42 @@
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .section-title { font-size: 13px; color: #0088cc; font-weight: bold; }
         
-        .list-container { max-height: 140px; overflow-y: auto; font-size: 12px; background: #181818; border-radius: 6px; padding: 8px; border: 1px solid #2a2a2a; }
-        .list-item { padding: 6px 4px; border-bottom: 1px solid #252525; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-        .list-item:last-child { border-bottom: none; }
-        .item-text { color: #eee; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-        .item-actions { display: flex; gap: 4px; }
+        .search-box { position: relative; margin-bottom: 10px; }
+        .dropdown-list { max-height: 160px; overflow-y: auto; background: #181818; border: 1px solid #333; border-radius: 6px; margin-top: 5px; }
+        .dropdown-item { padding: 8px; border-bottom: 1px solid #252525; display: flex; justify-content: space-between; align-items: center; font-size: 12px; gap: 8px; }
+        .dropdown-item:last-child { border-bottom: none; }
+        .item-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <!-- Logo do Canal -->
     <div class="logo-container">
         <img src="logo.png" alt="Logo do Canal" onerror="this.style.display='none'">
     </div>
 
     <h2>🚀 Telegram Forwarder</h2>
 
-    <!-- Entradas de Vídeo -->
+    <!-- Pesquisa dinâmica no Canal -->
+    <div class="section-box" style="border-top: none; padding-top: 0;">
+        <div class="section-header">
+            <span class="section-title">🔍 Legendas no Canal de Origem:</span>
+            <button class="btn-action" onclick="forcarVarreduraCanal()">🔄 Forçar Varredura</button>
+        </div>
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Digite para buscar legendas..." oninput="filtrarLegendas()">
+            <div class="dropdown-list" id="dropdownList">
+                <div style="color: #666; text-align: center; padding: 10px;">Carregando legendas...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Entradas de Mídia -->
     <label for="legenda1">Vídeo 1 - Legenda Exata:</label>
-    <textarea id="legenda1" placeholder="Cole a legenda do primeiro vídeo..."></textarea>
+    <textarea id="legenda1" placeholder="Selecione acima ou cole aqui..."></textarea>
 
     <label for="legenda2">Vídeo 2 (Opcional):</label>
-    <textarea id="legenda2" placeholder="Cole a legenda do segundo vídeo (opcional)..."></textarea>
+    <textarea id="legenda2" placeholder="Selecione acima ou cole aqui..."></textarea>
 
     <div class="btn-group">
         <button class="btn-send" id="btnSend" onclick="dispararActions()">Enviar Vídeo(s)</button>
@@ -62,67 +76,116 @@
 
     <div id="status-box"></div>
 
-    <!-- Lista de Legendas Disponíveis no Canal -->
-    <div class="section-box">
-        <div class="section-header">
-            <span class="section-title">📜 Legendas Encontradas no Canal</span>
-            <button class="btn-action" onclick="carregarLegendasCanal()">🔄 Atualizar</button>
-        </div>
-        <div class="list-container" id="legendasCanalList">
-            <div style="color: #666; text-align: center; padding: 10px;">Clique em "Atualizar" para listar.</div>
-        </div>
-    </div>
-
-    <!-- Histórico de Envios -->
+    <!-- Histórico Local -->
     <div class="section-box">
         <div class="section-header">
             <span class="section-title">📋 Histórico de Envios</span>
             <button class="btn-action" onclick="limparHistorico()">Limpar</button>
         </div>
-        <div class="list-container" id="historyList">
+        <div class="dropdown-list" id="historyList">
             <div style="color: #666; text-align: center; padding: 10px;">Nenhum envio registrado.</div>
         </div>
     </div>
 </div>
 
 <script>
-    // ⚠️ CONFIGURAÇÕES FIXAS DO GITHUB:
-    const GITHUB_TOKEN = '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'; 
-    const REPO_OWNER = 'antunesfelipe';           
+    // ⚠️ ATENÇÃO: COLOQUE SUAS CHAVES AQUI
+    const GITHUB_TOKEN = 'github_pat_SUA_CHAVE_AQUI'; 
+    const REPO_OWNER = 'SEU_USUARIO_GITHUB';           
     const REPO_NAME = 'telegram-forwarder';
     const WORKFLOW_ID = 'transferir.yml';
 
+    let legendasCanal = [];
     let currentRunId = null;
     let pollInterval = null;
-    let legendasEnviadasTemp = [];
+    let modoVarredura = false;
 
     window.onload = () => {
+        carregarLegendasJSON();
         carregarHistorico();
     };
 
-    // Copia o texto diretamente para os campos Vídeo 1 ou Vídeo 2
-    function copiarParaCampo(texto, campoId) {
-        document.getElementById(campoId).value = texto;
-        navigator.clipboard.writeText(texto);
+    // Lê o JSON gerado no repositório
+    async function carregarLegendasJSON() {
+        try {
+            const res = await fetch(`https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/legendas.json?v=${Date.now()}`);
+            if (res.ok) {
+                legendasCanal = await res.json();
+                filtrarLegendas();
+            } else {
+                document.getElementById('dropdownList').innerHTML = '<div style="color: #888; text-align: center; padding: 10px;">Clique em "Forçar Varredura" para ler o canal.</div>';
+            }
+        } catch (e) {
+            document.getElementById('dropdownList').innerHTML = '<div style="color: #888; text-align: center; padding: 10px;">Erro ao carregar legendas.</div>';
+        }
     }
 
-    // Dispara a Action no GitHub
+    // Filtro do campo de texto
+    function filtrarLegendas() {
+        const termo = document.getElementById('searchInput').value.toLowerCase();
+        const filtradas = legendasCanal.filter(l => l.toLowerCase().includes(termo));
+        const listDiv = document.getElementById('dropdownList');
+
+        if (filtradas.length === 0) {
+            listDiv.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhuma legenda encontrada.</div>';
+            return;
+        }
+
+        listDiv.innerHTML = filtradas.slice(0, 60).map(leg => `
+            <div class="dropdown-item">
+                <span class="item-text" title="${leg}">${leg}</span>
+                <div>
+                    <button class="btn-action" onclick="selecionarLegenda('${leg.replace(/'/g, "\\'")}', 'legenda1')">➕ Vídeo 1</button>
+                    <button class="btn-action" onclick="selecionarLegenda('${leg.replace(/'/g, "\\'")}', 'legenda2')">➕ Vídeo 2</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function selecionarLegenda(texto, campoId) {
+        document.getElementById(campoId).value = texto;
+    }
+
+    // Botão 🔄 Forçar Varredura
+    async function forcarVarreduraCanal() {
+        modoVarredura = true;
+        atualizarStatus('⏳ Varrendo canal de origem para buscar novas legendas...', 'in_progress');
+        
+        try {
+            const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                    'Accept': 'application/vnd.github+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ ref: 'main', inputs: { legenda_busca: '' } })
+            });
+
+            if (res.status === 204) {
+                setTimeout(monitorarStatus, 3000);
+            } else {
+                atualizarStatus('Erro ao solicitar varredura.', 'failure');
+            }
+        } catch (e) {
+            atualizarStatus('Erro de conexão.', 'failure');
+        }
+    }
+
+    // Botão Enviar Vídeos
     async function dispararActions() {
+        modoVarredura = false;
         const leg1 = document.getElementById('legenda1').value.trim();
         const leg2 = document.getElementById('legenda2').value.trim();
 
-        if (!leg1 && !leg2) return atualizarStatus('Digite ou selecione ao menos uma legenda!', 'failure');
+        if (!leg1 && !leg2) return atualizarStatus('Selecione ou digite ao menos uma legenda!', 'failure');
 
         const legendaFinal = leg2 ? `${leg1} ||| ${leg2}` : leg1;
-        legendasEnviadasTemp = [leg1, leg2].filter(Boolean);
-
-        atualizarStatus('⏳ Conectando ao GitHub Actions...', 'in_progress');
+        atualizarStatus('⏳ Conectando ao GitHub para transferir mídias...', 'in_progress');
         document.getElementById('btnSend').disabled = true;
 
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`;
-
         try {
-            const res = await fetch(url, {
+            const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${GITHUB_TOKEN}`,
@@ -140,18 +203,17 @@
                 document.getElementById('btnSend').disabled = false;
             }
         } catch (e) {
-            atualizarStatus('Erro de conexão ao disparar.', 'failure');
+            atualizarStatus('Erro de conexão.', 'failure');
             document.getElementById('btnSend').disabled = false;
         }
     }
 
+    // Acompanha a execução no GitHub Actions
     async function monitorarStatus() {
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs?workflow_id=${WORKFLOW_ID}&per_page=1`;
 
         try {
-            const res = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` }
-            });
+            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` } });
             const data = await res.json();
             
             if (data.workflow_runs && data.workflow_runs.length > 0) {
@@ -159,7 +221,8 @@
                 currentRunId = latestRun.id;
 
                 if (latestRun.status === 'in_progress' || latestRun.status === 'queued') {
-                    atualizarStatus(`⏳ Buscando e transferindo mídia... (${latestRun.status})`, 'in_progress');
+                    const txtMsg = modoVarredura ? '⏳ Atualizando índice de legendas...' : '⏳ Transferindo mídias...';
+                    atualizarStatus(`${txtMsg} (${latestRun.status})`, 'in_progress');
                     document.getElementById('btnCancel').style.display = 'block';
                     pollInterval = setTimeout(monitorarStatus, 3000);
                 } else if (latestRun.status === 'completed') {
@@ -167,40 +230,32 @@
                     document.getElementById('btnSend').disabled = false;
                     
                     if (latestRun.conclusion === 'success') {
-                        atualizarStatus('✅ Vídeo(s) enviado(s) com sucesso!', 'success');
-                        salvarNoHistorico(legendasEnviadasTemp);
-                        document.getElementById('legenda1').value = '';
-                        document.getElementById('legenda2').value = '';
+                        if (modoVarredura) {
+                            atualizarStatus('✅ Legendas do canal atualizadas com sucesso!', 'success');
+                            carregarLegendasJSON();
+                        } else {
+                            atualizarStatus('✅ Vídeo(s) enviado(s) com sucesso!', 'success');
+                            salvarHistorico();
+                        }
                     } else {
-                        atualizarStatus(`❌ Falha no script (Status: ${latestRun.conclusion}).`, 'failure');
+                        atualizarStatus(`❌ Ocorreu uma falha na execução.`, 'failure');
                     }
                 }
             }
-        } catch (e) {
-            console.error(e);
-        }
+        } catch (e) { console.error(e); }
     }
 
     async function cancelarRun() {
         if (!currentRunId) return;
-        atualizarStatus('⏳ Cancelando execução...', 'in_progress');
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${currentRunId}/cancel`;
-
-        try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` }
-            });
-
-            if (res.status === 202) {
-                clearTimeout(pollInterval);
-                atualizarStatus('🛑 Execução cancelada.', 'failure');
-                document.getElementById('btnCancel').style.display = 'none';
-                document.getElementById('btnSend').disabled = false;
-            }
-        } catch (e) {
-            alert('Não foi possível cancelar.');
-        }
+        atualizarStatus('⏳ Cancelando...', 'in_progress');
+        await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${currentRunId}/cancel`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${GITHUB_TOKEN}` }
+        });
+        clearTimeout(pollInterval);
+        atualizarStatus('🛑 Execução cancelada.', 'failure');
+        document.getElementById('btnCancel').style.display = 'none';
+        document.getElementById('btnSend').disabled = false;
     }
 
     function atualizarStatus(msg, tipo) {
@@ -210,31 +265,28 @@
         div.innerText = msg;
     }
 
-    /* HISTÓRICO LOCAL */
-    function salvarNoHistorico(legendas) {
+    function salvarHistorico() {
+        const leg1 = document.getElementById('legenda1').value.trim();
+        const leg2 = document.getElementById('legenda2').value.trim();
         let historico = JSON.parse(localStorage.getItem('tb_history') || '[]');
-        const agora = new Date().toLocaleString('pt-BR');
+        const agora = new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
 
-        legendas.forEach(leg => {
+        [leg1, leg2].filter(Boolean).forEach(leg => {
             historico.unshift({ nome: leg, data: agora });
         });
 
-        historico = historico.slice(0, 30);
-        localStorage.setItem('tb_history', JSON.stringify(historico));
+        localStorage.setItem('tb_history', JSON.stringify(historico.slice(0, 30)));
         carregarHistorico();
+        document.getElementById('legenda1').value = '';
+        document.getElementById('legenda2').value = '';
     }
 
     function carregarHistorico() {
         const historico = JSON.parse(localStorage.getItem('tb_history') || '[]');
         const container = document.getElementById('historyList');
-
-        if (historico.length === 0) {
-            container.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhum envio registrado.</div>';
-            return;
-        }
-
+        if (historico.length === 0) return;
         container.innerHTML = historico.map(item => `
-            <div class="list-item">
+            <div class="dropdown-item">
                 <span class="item-text">📹 ${item.nome}</span>
                 <span style="color: #777; font-size: 10px;">${item.data}</span>
             </div>
@@ -244,29 +296,8 @@
     function limparHistorico() {
         if (confirm("Apagar histórico de envios?")) {
             localStorage.removeItem('tb_history');
-            carregarHistorico();
+            document.getElementById('historyList').innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhum envio registrado.</div>';
         }
-    }
-
-    /* SIMULAÇÃO / CARREGAMENTO DE LEGENDAS DA ORIGEM */
-    function carregarLegendasCanal() {
-        const container = document.getElementById('legendasCanalList');
-        const historico = JSON.parse(localStorage.getItem('tb_history') || '[]');
-
-        if (historico.length === 0) {
-            container.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhuma legenda recente salva no histórico.</div>';
-            return;
-        }
-
-        container.innerHTML = historico.map(item => `
-            <div class="list-item">
-                <span class="item-text">${item.nome}</span>
-                <div class="item-actions">
-                    <button class="btn-action" onclick="copiarParaCampo('${item.nome.replace(/'/g, "\\'")}', 'legenda1')">📋 Vídeo 1</button>
-                    <button class="btn-action" onclick="copiarParaCampo('${item.nome.replace(/'/g, "\\'")}', 'legenda2')">📋 Vídeo 2</button>
-                </div>
-            </div>
-        `).join('');
     }
 </script>
 
