@@ -117,7 +117,7 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
                         
                         queue = asyncio.Queue()
 
-                        # Progresso do Download (0% a 50% na barra do vídeo "i")
+                        # Progresso do Download (0% a 50% para o vídeo atual)
                         def progress_down(current, total):
                             pct = int((current / total) * 50)
                             queue.put_nowait(pct)
@@ -139,7 +139,7 @@ async def executar_envio_stream(legenda1: str, legenda2: str):
                             yield f"data: {json.dumps({'status': 'info_video', 'index': i, 'msg': msg_status})}\n\n"
                             await asyncio.sleep(0.1)
 
-                            # Progresso do Upload (50% a 100% na barra do vídeo "i")
+                            # Progresso do Upload (50% a 100% para o vídeo atual)
                             def progress_up(current, total):
                                 pct = 50 + int((current / total) * 50)
                                 queue.put_nowait(pct)
@@ -181,4 +181,21 @@ def home():
 
 @app.get("/legendas")
 def obter_legendas():
-    if os
+    if os.path.exists("legendas.json"):
+        with open("legendas.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+@app.get("/varrer")
+async def varrer():
+    return await executar_varredura()
+
+@app.post("/enviar")
+async def enviar(payload: EnvioPayload):
+    if not payload.legenda1 and not payload.legenda2:
+        raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
+
+    return StreamingResponse(
+        executar_envio_stream(payload.legenda1, payload.legenda2),
+        media_type="text/event-stream"
+    )
