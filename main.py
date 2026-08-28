@@ -108,18 +108,36 @@ async def processar_envio_background(legenda1: str, legenda2: str):
             canal_destino = await resolver_canal(app_pyro, os.environ.get("CANAL_DESTINO", ""))
 
             for i, termo in enumerate(buscas):
-                termo_limpo = " ".join(termo.strip().split()).lower()
+                termo_normalizado = " ".join(termo.strip().split()).lower()
                 encontrado = False
                 
                 estado_envio["videos"][i]["msg"] = f"Buscando vídeo {i+1}..."
                 estado_envio["videos"][i]["pct"] = 5
                 
-                async for msg in app_pyro.get_chat_history(canal_origem, limit=500):
+                # Coleta até 1500 mensagens do histórico
+                mensagens = [m async for m in app_pyro.get_chat_history(canal_origem, limit=1500)]
+                
+                for index, msg in enumerate(mensagens):
                     txt = msg.caption or msg.text or ""
-                    txt_limpo = " ".join(txt.strip().split()).lower()
+                    txt_normalizado = " ".join(txt.strip().split()).lower()
                     
-                    if txt_limpo and termo_limpo in txt_limpo:
+                    if txt_normalizado and (termo_normalizado in txt_normalizado or txt_normalizado in termo_normalizado):
+                        msg_video = None
+                        caption_enviar = txt
+
+                        # 1. Checa se a própria mensagem encontrada é um vídeo/documento
                         if msg.video or msg.animation or msg.document:
+                            msg_video = msg
+                        # 2. Se for apenas imagem/texto (capa), verifica as mensagens seguintes (abaixo)
+                        else:
+                            for offset in range(1, 4):
+                                if index - offset >= 0:
+                                    m_prox = mensagens[index - offset]
+                                    if m_prox.video or m_prox.animation or m_prox.document:
+                                        msg_video = m_prox
+                                        break
+                        
+                        if msg_video:
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             caminho_arquivo = os.path.join(temp_dir, f"vid_{i}.mp4")
                             
@@ -131,8 +149,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                     estado_envio["videos"][i]["pct"] = pct
                                     last_update = time.time()
 
-                            # Download oficial otimizado
-                            await app_pyro.download_media(msg, file_name=caminho_arquivo, progress=cb_down)
+                            await app_pyro.download_media(msg_video, file_name=caminho_arquivo, progress=cb_down)
                             gc.collect()
 
                             try:
@@ -145,11 +162,9 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                         estado_envio["videos"][i]["pct"] = pct
                                         last_up = time.time()
 
-                                caption_enviar = msg.caption or txt
-                                
-                                if msg.video:
+                                if msg_video.video:
                                     await app_pyro.send_video(chat_id=canal_destino, video=caminho_arquivo, caption=caption_enviar, progress=cb_up)
-                                elif msg.animation:
+                                elif msg_video.animation:
                                     await app_pyro.send_animation(chat_id=canal_destino, animation=caminho_arquivo, caption=caption_enviar, progress=cb_up)
                                 else:
                                     await app_pyro.send_document(chat_id=canal_destino, document=caminho_arquivo, caption=caption_enviar, progress=cb_up)
@@ -198,7 +213,6 @@ async def varrer_canal():
         async with app_pyro:
             canal_origem = await resolver_canal(app_pyro, os.environ.get("CANAL_ORIGEM", ""))
             
-            # Limite alterado de 300 para 1500 mensagens
             async for msg in app_pyro.get_chat_history(canal_origem, limit=1500):
                 txt = msg.caption or msg.text or ""
                 txt_limpo = " ".join(txt.strip().split())
