@@ -18,9 +18,12 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip'
 
-      - name: Install dependencies
-        run: pip install pyrogram tgcrypto
+      - name: Install dependencies fast
+        run: |
+          python -m pip install --upgrade pip
+          pip install --only-binary=:all: pyrogram tgcrypto
 
       - name: Run Search & Send
         env:
