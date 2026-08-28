@@ -4,23 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       legenda_busca:
-        description: 'Legenda exata a buscar (deixe em branco apenas para atualizar legendas)'
+        description: 'Legenda exata a buscar'
         required: false
+        default: ''
         type: string
 
 jobs:
   processar:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout do repositorio
+        uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Configurar Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: pip install --only-binary=:all: pyrogram tgcrypto
 
       - name: Indexar Legendas do Canal
@@ -39,7 +41,7 @@ jobs:
           git commit -m "Atualizando lista de legendas [skip ci]" || exit 0
           git push
 
-      - name: Executar Envio de Mídia
+      - name: Executar Envio de Midia
         if: ${{ github.event.inputs.legenda_busca != '' }}
         env:
           API_ID: ${{ secrets.API_ID }}
