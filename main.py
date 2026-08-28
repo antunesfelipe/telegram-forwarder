@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Garbage Collector agressivo para o Render Free
-gc.set_threshold(50, 5, 5)
+# Limpeza agressiva para container de 512MB RAM
+gc.set_threshold(100, 5, 5)
 
 estado_envio = {
     "em_andamento": False,
@@ -139,36 +139,54 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                     
                     if txt_limpo and termo_limpo in txt_limpo:
                         if msg.video or msg.animation or msg.document:
-                            estado_envio["videos"][i]["msg"] = "Baixando mídia em fluxo..."
-                            estado_envio["videos"][i]["pct"] = 10
+                            estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             
+                            # Callback de download atualiza progresso em tempo real sem travar o Event Loop
+                            def cb_down(current, total):
+                                pct = 10 + int((current / total) * 45)
+                                estado_envio["videos"][i]["pct"] = pct
+
                             caminho_arquivo = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
                             
-                            # Baixa usando iterador com alocação mínima
-                            with open(caminho_arquivo, "wb") as f:
-                                async for chunk in app_pyro.stream_media(msg):
-                                    f.write(chunk)
-                                    await asyncio.sleep(0.001) # Cede tempo de CPU pro FastAPI responder /status_progresso
-
+                            # Baixa usando a função nativa do Pyrogram
+                            await app_pyro.download_media(
+                                msg, 
+                                file_name=caminho_arquivo, 
+                                progress=cb_down
+                            )
                             gc.collect()
 
                             try:
                                 estado_envio["videos"][i]["msg"] = "Enviando mídia limpa..."
-                                estado_envio["videos"][i]["pct"] = 60
 
-                                def progress_callback(current, total):
-                                    pct = 60 + int((current / total) * 38)
+                                # Callback de upload atualiza progresso suavemente
+                                def cb_up(current, total):
+                                    pct = 55 + int((current / total) * 43)
                                     estado_envio["videos"][i]["pct"] = pct
 
                                 caption_enviar = msg.caption or txt
                                 
-                                # Envio com callback para manter o socket ativo
                                 if msg.video:
-                                    await app_pyro.send_video(chat_id=canal_destino, video=caminho_arquivo, caption=caption_enviar, progress=progress_callback)
+                                    await app_pyro.send_video(
+                                        chat_id=canal_destino, 
+                                        video=caminho_arquivo, 
+                                        caption=caption_enviar, 
+                                        progress=cb_up
+                                    )
                                 elif msg.animation:
-                                    await app_pyro.send_animation(chat_id=canal_destino, animation=caminho_arquivo, caption=caption_enviar, progress=progress_callback)
+                                    await app_pyro.send_animation(
+                                        chat_id=canal_destino, 
+                                        animation=caminho_arquivo, 
+                                        caption=caption_enviar, 
+                                        progress=cb_up
+                                    )
                                 else:
-                                    await app_pyro.send_document(chat_id=canal_destino, document=caminho_arquivo, caption=caption_enviar, progress=progress_callback)
+                                    await app_pyro.send_document(
+                                        chat_id=canal_destino, 
+                                        document=caminho_arquivo, 
+                                        caption=caption_enviar, 
+                                        progress=cb_up
+                                    )
 
                                 estado_envio["videos"][i]["msg"] = "Concluído com sucesso!"
                                 estado_envio["videos"][i]["pct"] = 100
