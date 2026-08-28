@@ -24,7 +24,7 @@ async def main():
         print(f"📥 Buscando mensagens do canal ID: {chat_id}...")
         
         # Pega as mensagens (lendo até 500 para ser bem mais rápido)
-        async for msg in app.get_chat_history(chat_id, limit=500):
+        async for msg in app.get_chat_history(chat_id, limit=10000):
             txt = msg.caption or msg.text
             if txt:
                 primeira_linha = txt.strip().split('\n')[0].strip()
