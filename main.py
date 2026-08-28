@@ -7,13 +7,13 @@ except RuntimeError:
 import os
 import json
 import tempfile
+import gc
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Estrutura global para guardar o progresso em tempo real
 estado_envio = {
     "em_andamento": False,
     "concluido": False,
@@ -23,12 +23,12 @@ estado_envio = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Servidor iniciando... Rodando varredura automática de legendas...")
+    print("🚀 Servidor iniciando... Rodando varredura automática...")
     try:
         await executar_varredura()
-        print("✅ Varredura inicial concluída com sucesso!")
+        print("✅ Varredura concluída!")
     except Exception as e:
-        print(f"⚠️ Erro na varredura inicial: {e}")
+        print(f"⚠️ Erro na varredura: {e}")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -49,7 +49,14 @@ def obter_cliente_telegram():
     api_id = int(os.environ["API_ID"])
     api_hash = os.environ["API_HASH"]
     session = os.environ["TELEGRAM_SESSION"]
-    return Client("user_session", api_id=api_id, api_hash=api_hash, session_string=session)
+    # Configurado para limitar o uso de memória interna do cliente Telegram
+    return Client(
+        "user_session", 
+        api_id=api_id, 
+        api_hash=api_hash, 
+        session_string=session,
+        max_concurrent_transfers=1 # Força 1 transferência por vez para economizar RAM
+    )
 
 def resolver_chat_id(valor: str):
     valor = valor.strip()
@@ -65,10 +72,7 @@ async def executar_varredura():
     legendas = set()
 
     async with app_pyro:
-        async for _ in app_pyro.get_dialogs(limit=100):
-            pass
-
-        async for msg in app_pyro.get_chat_history(canal_origem, limit=5000):
+        async for msg in app_pyro.get_chat_history(canal_origem, limit=2000):
             txt = msg.caption or msg.text
             if txt:
                 primeira_linha = txt.strip().split('\n')[0].strip()
@@ -76,10 +80,10 @@ async def executar_varredura():
                     legendas.add(primeira_linha)
 
     resultado = sorted(list(legendas))
-    
     with open("legendas.json", "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=2)
-        
+    
+    gc.collect() # Libera RAM após varredura
     return resultado
 
 async def processar_envio_background(legenda1: str, legenda2: str):
@@ -89,7 +93,6 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     buscas = [l for l in [legenda1, legenda2] if l]
     total_videos = len(buscas)
     
-    # Inicializa o estado de progresso
     estado_envio["em_andamento"] = True
     estado_envio["concluido"] = False
     estado_envio["msg_final"] = ""
@@ -98,59 +101,42 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     app_pyro = obter_cliente_telegram()
     enviados = 0
 
-    # Garante que a pasta temporária de downloads existe no servidor
     temp_dir = os.path.join(tempfile.gettempdir(), "telegram_downloads")
     os.makedirs(temp_dir, exist_ok=True)
 
     try:
         async with app_pyro:
-            async for _ in app_pyro.get_dialogs(limit=200):
-                pass
-
             for i, termo in enumerate(buscas):
                 encontrado = False
-                mensagens = []
                 
-                async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
-                    mensagens.append(msg)
-
-                for idx, msg in enumerate(mensagens):
+                # Busca direta otimizada
+                async for msg in app_pyro.search_messages(canal_origem, query=termo, limit=5):
                     txt = msg.caption or msg.text
                     if txt and termo.lower() in txt.lower():
-                        msg_video = None
-                        legenda_texto = txt
-
-                        if msg.video or msg.animation:
-                            msg_video = msg
-                        elif idx > 0:
-                            msg_seguinte = mensagens[idx - 1]
-                            if msg_seguinte.video or msg_seguinte.animation:
-                                msg_video = msg_seguinte
-
+                        msg_video = msg if (msg.video or msg.animation) else None
+                        
                         if msg_video:
-                            estado_envio["videos"][i]["msg"] = "Baixando mídia do Telegram..."
+                            estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             
-                            # Progresso do Download (0% a 50%)
                             def progress_down(current, total):
                                 pct = int((current / total) * 50)
                                 estado_envio["videos"][i]["pct"] = pct
 
-                            # Salva em caminho temporário seguro
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg_video.id}.mp4")
                             file_path = await app_pyro.download_media(msg_video, file_name=caminho_destino, progress=progress_down)
                             
                             try:
-                                estado_envio["videos"][i]["msg"] = "Enviando mídia para destino..."
+                                estado_envio["videos"][i]["msg"] = "Enviando mídia..."
 
-                                # Progresso do Upload (50% a 100%)
                                 def progress_up(current, total):
                                     pct = 50 + int((current / total) * 50)
                                     estado_envio["videos"][i]["pct"] = pct
 
+                                # Envia como documento para reduzir o consumo do processador do Render na conversão
                                 if msg_video.video:
-                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=legenda_texto, progress=progress_up)
+                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=txt, progress=progress_up)
                                 else:
-                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=legenda_texto, progress=progress_up)
+                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=txt, progress=progress_up)
 
                                 estado_envio["videos"][i]["msg"] = "Concluído com sucesso!"
                                 estado_envio["videos"][i]["pct"] = 100
@@ -159,6 +145,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             finally:
                                 if file_path and os.path.exists(file_path):
                                     os.remove(file_path)
+                                gc.collect() # Força limpeza da memória após cada vídeo
                             break
 
                 if not encontrado:
@@ -171,8 +158,8 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     finally:
         estado_envio["concluido"] = True
         estado_envio["em_andamento"] = False
+        gc.collect()
 
-# Rotas
 @app.get("/")
 def home():
     return {"status": "API Telegram Forwarder rodando com sucesso!"}
@@ -188,7 +175,6 @@ def obter_legendas():
 async def varrer():
     return await executar_varredura()
 
-# Nova rota consumida pelo frontend a cada 1s para atualizar a barra
 @app.get("/status_progresso")
 def status_progresso():
     return estado_envio
@@ -199,8 +185,7 @@ async def enviar(payload: EnvioPayload, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
 
     if estado_envio["em_andamento"]:
-        raise HTTPException(status_code=400, detail="Já existe um envio em andamento no momento.")
+        raise HTTPException(status_code=400, detail="Já existe um envio em andamento.")
 
-    # Inicia a tarefa de envio totalmente desconectada do HTTP
     background_tasks.add_task(processar_envio_background, payload.legenda1, payload.legenda2)
     return {"status": "iniciado"}
