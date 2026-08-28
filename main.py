@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-# Limite agressivo do Garbage Collector para desalocar memória no Render
+# Coleta agressiva de memória
 gc.set_threshold(100, 5, 5)
 
 estado_envio = {
@@ -57,17 +57,14 @@ def obter_cliente_telegram():
     )
 
 async def resolver_canal(app_pyro: Client, valor: str):
-    """ Resolve o canal aceitando ID numérico (-100...), username (@) ou link (t.me) """
     valor_str = str(valor).strip()
     if not valor_str:
         raise ValueError("Variável do canal não configurada.")
         
-    # Se for link de convite ou @username, resolve diretamente
     if "t.me/" in valor_str or valor_str.startswith("@"):
         chat = await app_pyro.get_chat(valor_str)
         return chat.id
 
-    # Se for ID numérico (ex: -100...)
     if valor_str.startswith("-") and valor_str[1:].isdigit():
         chat_id = int(valor_str)
         try:
@@ -76,7 +73,6 @@ async def resolver_canal(app_pyro: Client, valor: str):
         except Exception:
             pass
 
-        # Força o carregamento de diálogos para atualizar o cache de chats da sessão
         async for dialog in app_pyro.get_dialogs(limit=500):
             if dialog.chat.id == chat_id:
                 return dialog.chat.id
@@ -143,14 +139,13 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                     
                     if txt_limpo and termo_limpo in txt_limpo:
                         if msg.video or msg.animation or msg.document:
-                            estado_envio["videos"][i]["msg"] = "Baixando mídia por partes..."
+                            estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             estado_envio["videos"][i]["pct"] = 10
                             
+                            # Atualiza progresso de download sem trava de CPU
                             def progress_down(current, total):
                                 pct = 10 + int((current / total) * 45)
                                 estado_envio["videos"][i]["pct"] = pct
-                                if current % (5 * 1024 * 1024) == 0:
-                                    gc.collect()
 
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
                             file_path = await app_pyro.download_media(msg, file_name=caminho_destino, progress=progress_down)
@@ -159,11 +154,10 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             try:
                                 estado_envio["videos"][i]["msg"] = "Enviando mídia..."
 
+                                # Atualiza progresso de envio sem trava de CPU
                                 def progress_up(current, total):
                                     pct = 55 + int((current / total) * 43)
                                     estado_envio["videos"][i]["pct"] = pct
-                                    if current % (5 * 1024 * 1024) == 0:
-                                        gc.collect()
 
                                 caption_enviar = msg.caption or txt
                                 if msg.video:
