@@ -7,14 +7,26 @@ except RuntimeError:
 
 import os
 import json
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
 
-app = FastAPI()
+# Executa a varredura automaticamente assim que o servidor liga na Render
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("🚀 Servidor iniciando... Rodando varredura automática de legendas...")
+    try:
+        await executar_varredura()
+        print("✅ Varredura inicial concluída com sucesso!")
+    except Exception as e:
+        print(f"⚠️ Erro na varredura inicial: {e}")
+    yield
 
-# Permite que o seu site faça requisições para a Render sem erro de CORS
+app = FastAPI(lifespan=lifespan)
+
+# Permite requisições do Netlify
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,11 +60,9 @@ async def executar_varredura():
     legendas = set()
 
     async with app_pyro:
-        # Carrega os diálogos para esquentar o cache de conversas do Pyrogram
         async for _ in app_pyro.get_dialogs(limit=100):
             pass
 
-        # Varrer até 5.000 mensagens
         async for msg in app_pyro.get_chat_history(canal_origem, limit=5000):
             txt = msg.caption or msg.text
             if txt:
@@ -62,7 +72,6 @@ async def executar_varredura():
 
     resultado = sorted(list(legendas))
     
-    # Salva localmente na Render
     with open("legendas.json", "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=2)
         
@@ -79,7 +88,6 @@ async def executar_envio(legenda1: str, legenda2: str):
     nao_encontrados = []
 
     async with app_pyro:
-        # Carrega conversas para evitar erro de Peer ID
         async for _ in app_pyro.get_dialogs(limit=200):
             pass
 
@@ -88,7 +96,6 @@ async def executar_envio(legenda1: str, legenda2: str):
             async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
                 txt = msg.caption or msg.text
                 if txt and termo.lower() in txt.lower():
-                    # Método fallback de download/upload para burlar CHAT_FORWARDS_RESTRICTED
                     file_path = await app_pyro.download_media(msg)
                     
                     try:
@@ -101,7 +108,6 @@ async def executar_envio(legenda1: str, legenda2: str):
                         else:
                             await app_pyro.send_message(chat_id=canal_destino, text=txt)
                     finally:
-                        # Remove o arquivo do servidor local após o envio
                         if file_path and os.path.exists(file_path):
                             os.remove(file_path)
 
