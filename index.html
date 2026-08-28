@@ -7,36 +7,48 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .card { background: #1e1e1e; padding: 25px; border-radius: 12px; width: 100%; max-width: 520px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-        h2 { margin-top: 0; color: #0088cc; font-size: 22px; text-align: center; }
+        .logo-container { text-align: center; margin-bottom: 15px; }
+        .logo-container img { max-width: 120px; max-height: 80px; object-fit: contain; }
+        h2 { margin-top: 0; color: #0088cc; font-size: 20px; text-align: center; }
         label { display: block; margin-top: 15px; margin-bottom: 5px; font-size: 13px; color: #ccc; font-weight: bold; }
-        textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 13px; box-sizing: border-box; height: 60px; resize: vertical; }
+        textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 13px; box-sizing: border-box; height: 50px; resize: vertical; }
+        
         .btn-group { display: flex; gap: 10px; margin-top: 20px; }
         button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn-send { background: #0088cc; color: white; }
         .btn-send:hover { background: #006699; }
         .btn-cancel { background: #d32f2f; color: white; display: none; }
         .btn-cancel:hover { background: #9a0007; }
+        .btn-action { background: #333; color: #fff; padding: 4px 8px; font-size: 11px; border-radius: 4px; border: 1px solid #444; }
+        .btn-action:hover { background: #0088cc; border-color: #0088cc; }
+        
         #status-box { margin-top: 20px; padding: 12px; border-radius: 8px; text-align: center; font-size: 13px; font-weight: bold; background: #2a2a2a; display: none; }
         .in_progress { color: #ffb74d; border: 1px solid #ffb74d; }
         .success { color: #81c784; border: 1px solid #81c784; }
         .failure { color: #e57373; border: 1px solid #e57373; }
-        .history-section { margin-top: 25px; border-top: 1px solid #333; padding-top: 15px; }
-        .history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .history-title { font-size: 14px; color: #0088cc; font-weight: bold; }
-        .btn-clear { background: transparent; border: none; color: #888; font-size: 11px; cursor: pointer; }
-        .btn-clear:hover { color: #e57373; }
-        .history-list { max-height: 160px; overflow-y: auto; font-size: 12px; background: #181818; border-radius: 6px; padding: 8px; border: 1px solid #2a2a2a; }
-        .history-item { padding: 6px 4px; border-bottom: 1px solid #252525; display: flex; flex-direction: column; gap: 2px; }
-        .history-item:last-child { border-bottom: none; }
-        .item-title { color: #eee; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .item-date { color: #777; font-size: 10px; }
+
+        .section-box { margin-top: 20px; border-top: 1px solid #333; padding-top: 15px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .section-title { font-size: 13px; color: #0088cc; font-weight: bold; }
+        
+        .list-container { max-height: 140px; overflow-y: auto; font-size: 12px; background: #181818; border-radius: 6px; padding: 8px; border: 1px solid #2a2a2a; }
+        .list-item { padding: 6px 4px; border-bottom: 1px solid #252525; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .list-item:last-child { border-bottom: none; }
+        .item-text { color: #eee; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+        .item-actions { display: flex; gap: 4px; }
     </style>
 </head>
 <body>
 
 <div class="card">
+    <!-- Logo do Canal -->
+    <div class="logo-container">
+        <img src="logo.png" alt="Logo do Canal" onerror="this.style.display='none'">
+    </div>
+
     <h2>🚀 Telegram Forwarder</h2>
 
+    <!-- Entradas de Vídeo -->
     <label for="legenda1">Vídeo 1 - Legenda Exata:</label>
     <textarea id="legenda1" placeholder="Cole a legenda do primeiro vídeo..."></textarea>
 
@@ -50,18 +62,31 @@
 
     <div id="status-box"></div>
 
-    <div class="history-section">
-        <div class="history-header">
-            <span class="history-title">📋 Histórico de Envios</span>
-            <button class="btn-clear" onclick="limparHistorico()">Limpar</button>
+    <!-- Lista de Legendas Disponíveis no Canal -->
+    <div class="section-box">
+        <div class="section-header">
+            <span class="section-title">📜 Legendas Encontradas no Canal</span>
+            <button class="btn-action" onclick="carregarLegendasCanal()">🔄 Atualizar</button>
         </div>
-        <div class="history-list" id="historyList">
-            <div style="color: #666; text-align: center; padding: 10px;">Nenhum envio gravado.</div>
+        <div class="list-container" id="legendasCanalList">
+            <div style="color: #666; text-align: center; padding: 10px;">Clique em "Atualizar" para listar.</div>
+        </div>
+    </div>
+
+    <!-- Histórico de Envios -->
+    <div class="section-box">
+        <div class="section-header">
+            <span class="section-title">📋 Histórico de Envios</span>
+            <button class="btn-action" onclick="limparHistorico()">Limpar</button>
+        </div>
+        <div class="list-container" id="historyList">
+            <div style="color: #666; text-align: center; padding: 10px;">Nenhum envio registrado.</div>
         </div>
     </div>
 </div>
 
 <script>
+    // ⚠️ CONFIGURAÇÕES FIXAS DO GITHUB:
     const GITHUB_TOKEN = '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'; 
     const REPO_OWNER = 'antunesfelipe';           
     const REPO_NAME = 'telegram-forwarder';
@@ -71,13 +96,22 @@
     let pollInterval = null;
     let legendasEnviadasTemp = [];
 
-    window.onload = carregarHistorico;
+    window.onload = () => {
+        carregarHistorico();
+    };
 
+    // Copia o texto diretamente para os campos Vídeo 1 ou Vídeo 2
+    function copiarParaCampo(texto, campoId) {
+        document.getElementById(campoId).value = texto;
+        navigator.clipboard.writeText(texto);
+    }
+
+    // Dispara a Action no GitHub
     async function dispararActions() {
         const leg1 = document.getElementById('legenda1').value.trim();
         const leg2 = document.getElementById('legenda2').value.trim();
 
-        if (!leg1 && !leg2) return atualizarStatus('Digite ao menos uma legenda!', 'failure');
+        if (!leg1 && !leg2) return atualizarStatus('Digite ou selecione ao menos uma legenda!', 'failure');
 
         const legendaFinal = leg2 ? `${leg1} ||| ${leg2}` : leg1;
         legendasEnviadasTemp = [leg1, leg2].filter(Boolean);
@@ -125,7 +159,7 @@
                 currentRunId = latestRun.id;
 
                 if (latestRun.status === 'in_progress' || latestRun.status === 'queued') {
-                    atualizarStatus(`⏳ Processando vídeo(s)... (Status: ${latestRun.status})`, 'in_progress');
+                    atualizarStatus(`⏳ Buscando e transferindo mídia... (${latestRun.status})`, 'in_progress');
                     document.getElementById('btnCancel').style.display = 'block';
                     pollInterval = setTimeout(monitorarStatus, 3000);
                 } else if (latestRun.status === 'completed') {
@@ -149,7 +183,6 @@
 
     async function cancelarRun() {
         if (!currentRunId) return;
-
         atualizarStatus('⏳ Cancelando execução...', 'in_progress');
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${currentRunId}/cancel`;
 
@@ -177,6 +210,7 @@
         div.innerText = msg;
     }
 
+    /* HISTÓRICO LOCAL */
     function salvarNoHistorico(legendas) {
         let historico = JSON.parse(localStorage.getItem('tb_history') || '[]');
         const agora = new Date().toLocaleString('pt-BR');
@@ -192,26 +226,47 @@
 
     function carregarHistorico() {
         const historico = JSON.parse(localStorage.getItem('tb_history') || '[]');
-        const listContainer = document.getElementById('historyList');
+        const container = document.getElementById('historyList');
 
         if (historico.length === 0) {
-            listContainer.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhum envio gravado.</div>';
+            container.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhum envio registrado.</div>';
             return;
         }
 
-        listContainer.innerHTML = historico.map(item => `
-            <div class="history-item">
-                <span class="item-title">📹 ${item.nome}</span>
-                <span class="item-date">📅 ${item.data}</span>
+        container.innerHTML = historico.map(item => `
+            <div class="list-item">
+                <span class="item-text">📹 ${item.nome}</span>
+                <span style="color: #777; font-size: 10px;">${item.data}</span>
             </div>
         `).join('');
     }
 
     function limparHistorico() {
-        if (confirm("Deseja apagar o histórico de envios?")) {
+        if (confirm("Apagar histórico de envios?")) {
             localStorage.removeItem('tb_history');
             carregarHistorico();
         }
+    }
+
+    /* SIMULAÇÃO / CARREGAMENTO DE LEGENDAS DA ORIGEM */
+    function carregarLegendasCanal() {
+        const container = document.getElementById('legendasCanalList');
+        const historico = JSON.parse(localStorage.getItem('tb_history') || '[]');
+
+        if (historico.length === 0) {
+            container.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">Nenhuma legenda recente salva no histórico.</div>';
+            return;
+        }
+
+        container.innerHTML = historico.map(item => `
+            <div class="list-item">
+                <span class="item-text">${item.nome}</span>
+                <div class="item-actions">
+                    <button class="btn-action" onclick="copiarParaCampo('${item.nome.replace(/'/g, "\\'")}', 'legenda1')">📋 Vídeo 1</button>
+                    <button class="btn-action" onclick="copiarParaCampo('${item.nome.replace(/'/g, "\\'")}', 'legenda2')">📋 Vídeo 2</button>
+                </div>
+            </div>
+        `).join('');
     }
 </script>
 
