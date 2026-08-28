@@ -8,6 +8,7 @@ import os
 import json
 import tempfile
 import gc
+import shutil
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,26 +53,21 @@ def obter_cliente_telegram():
     )
 
 async def obter_peer_chat(app_pyro: Client, valor: str):
-    """ Resolve o canal via ID numérico, link de convite ou @username """
     valor_str = str(valor).strip()
-    
-    # Se for link do Telegram ou Username, resolve direto
     if "t.me/" in valor_str or valor_str.startswith("@"):
         chat = await app_pyro.get_chat(valor_str)
         return chat.id
         
-    # Se for ID numérico
     if valor_str.startswith("-") and valor_str[1:].isdigit():
         chat_id = int(valor_str)
         try:
             chat = await app_pyro.get_chat(chat_id)
             return chat.id
         except Exception:
-            # Se der Peer Invalid, força busca em todos os diálogos do usuário
             async for dialog in app_pyro.get_dialogs():
                 if dialog.chat.id == chat_id:
                     return dialog.chat.id
-            raise ValueError(f"Sessão não encontrou o canal {chat_id}. Coloque o LINK de convite do canal na variável de ambiente.")
+            raise ValueError(f"Canal {chat_id} não encontrado na sessão.")
             
     return valor_str
 
@@ -111,6 +107,8 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     enviados = 0
 
     temp_dir = os.path.join(tempfile.gettempdir(), "telegram_downloads")
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir, ignore_errors=True)
     os.makedirs(temp_dir, exist_ok=True)
 
     try:
@@ -132,10 +130,10 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                     if txt_limpo and termo_limpo in txt_limpo:
                         if msg.video or msg.animation or msg.document:
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
-                            estado_envio["videos"][i]["pct"] = 25
+                            estado_envio["videos"][i]["pct"] = 20
                             
                             def progress_down(current, total):
-                                pct = 25 + int((current / total) * 35)
+                                pct = 20 + int((current / total) * 40)
                                 estado_envio["videos"][i]["pct"] = pct
 
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
@@ -145,7 +143,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                 estado_envio["videos"][i]["msg"] = "Enviando para destino..."
 
                                 def progress_up(current, total):
-                                    pct = 60 + int((current / total) * 40)
+                                    pct = 60 + int((current / total) * 38)
                                     estado_envio["videos"][i]["pct"] = pct
 
                                 caption_enviar = msg.caption or txt
@@ -161,6 +159,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                 encontrado = True
                                 enviados += 1
                             finally:
+                                # Deleta o arquivo IMEDIATAMENTE para liberar disco e RAM antes do próximo vídeo
                                 if file_path and os.path.exists(file_path):
                                     os.remove(file_path)
                                 gc.collect()
@@ -177,6 +176,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     finally:
         estado_envio["concluido"] = True
         estado_envio["em_andamento"] = False
+        shutil.rmtree(temp_dir, ignore_errors=True)
         gc.collect()
 
 @app.get("/")
