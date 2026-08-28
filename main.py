@@ -53,8 +53,7 @@ def obter_cliente_telegram():
         "user_session", 
         api_id=api_id, 
         api_hash=api_hash, 
-        session_string=session,
-        max_concurrent_transfers=1
+        session_string=session
     )
 
 def resolver_chat_id(valor: str):
@@ -89,13 +88,14 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     global estado_envio
     canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
     canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
-    buscas = [l for l in [legenda1, legenda2] if l]
+    
+    buscas = [l for l in [legenda1, legenda2] if l.strip()]
     total_videos = len(buscas)
     
     estado_envio["em_andamento"] = True
     estado_envio["concluido"] = False
     estado_envio["msg_final"] = ""
-    estado_envio["videos"] = [{"msg": "Iniciando busca...", "pct": 0, "status": "progress"} for _ in buscas]
+    estado_envio["videos"] = [{"msg": "Aguardando...", "pct": 0, "status": "progress"} for _ in buscas]
 
     app_pyro = obter_cliente_telegram()
     enviados = 0
@@ -106,34 +106,34 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     try:
         async with app_pyro:
             for i, termo in enumerate(buscas):
-                # Normaliza espaços extras
-                termo_limpo = " ".join(termo.strip().split())
+                termo_limpo = " ".join(termo.strip().split()).lower()
                 encontrado = False
                 
-                estado_envio["videos"][i]["msg"] = f"Buscando: {termo_limpo[:20]}..."
-                estado_envio["videos"][i]["pct"] = 10 # Atualiza o status visual no front imediatamente
+                estado_envio["videos"][i]["msg"] = f"Buscando no canal..."
+                estado_envio["videos"][i]["pct"] = 10
                 
-                # Usa busca indexada via API nativa do Telegram (respostas em milissegundos)
-                async for msg in app_pyro.search_messages(canal_origem, query=termo_limpo, limit=10):
+                # Variação direta do histórico rápida (limitada às últimas 500 mensagens)
+                async for msg in app_pyro.get_chat_history(canal_origem, limit=500):
                     txt = msg.caption or msg.text or ""
+                    txt_limpo = " ".join(txt.strip().split()).lower()
                     
-                    if " ".join(termo_limpo.lower().split()) in " ".join(txt.lower().split()):
+                    if txt_limpo and termo_limpo in txt_limpo:
                         if msg.video or msg.animation or msg.document:
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
                             estado_envio["videos"][i]["pct"] = 25
                             
                             def progress_down(current, total):
-                                pct = 25 + int((current / total) * 35) # Progresso de 25% a 60%
+                                pct = 25 + int((current / total) * 35)
                                 estado_envio["videos"][i]["pct"] = pct
 
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
                             file_path = await app_pyro.download_media(msg, file_name=caminho_destino, progress=progress_down)
                             
                             try:
-                                estado_envio["videos"][i]["msg"] = "Enviando mídia..."
+                                estado_envio["videos"][i]["msg"] = "Enviando para destino..."
 
                                 def progress_up(current, total):
-                                    pct = 60 + int((current / total) * 40) # Progresso de 60% a 100%
+                                    pct = 60 + int((current / total) * 40)
                                     estado_envio["videos"][i]["pct"] = pct
 
                                 caption_enviar = msg.caption or txt
