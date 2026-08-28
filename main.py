@@ -7,7 +7,7 @@ except RuntimeError:
 
 import os
 import json
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pyrogram import Client
@@ -75,67 +75,12 @@ async def executar_envio(legenda1: str, legenda2: str):
     buscas = [l for l in [legenda1, legenda2] if l]
     app_pyro = obter_cliente_telegram()
 
-    async with app_pyro:
-        async for _ in app_pyro.get_dialogs(limit=100):
-            pass
-
-        for termo in buscas:
-            encontrado = False
-            async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
-                txt = msg.caption or msg.text
-                if txt and termo.lower() in txt.lower():
-                    # Copia a mídia/mensagem para o canal de destino
-                    await msg.copy(canal_destino)
-                    encontrado = True
-                    break
-            
-            if not encontrado:
-                print(f"Alerta: Nenhuma mídia encontrada para a legenda: {termo}")
-
-# Rotas da API
-@app.get("/")
-def home():
-    return {"status": "API Telegram Forwarder rodando com sucesso!"}
-
-# ROTA NOVA: Devolve as legendas salvas na Render para a tela
-@app.get("/legendas")
-def obter_legendas():
-    if os.path.exists("legendas.json"):
-        with open("legendas.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-# ROTA AJUSTADA: Executa a varredura e já devolve a lista atualizada
-@app.get("/varrer")
-async def varrer():
-    legendas_atualizadas = await executar_varredura()
-    return legendas_atualizadas
-
-@app.post("/enviar")
-async def enviar(payload: EnvioPayload):
-    if not payload.legenda1 and not payload.legenda2:
-        raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
-
-    try:
-        resultado = await executar_envio(payload.legenda1, payload.legenda2)
-        return resultado
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-async def executar_envio(legenda1: str, legenda2: str):
-    canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
-    canal_destino = resolver_chat_id(os.environ["CANAL_DESTINO"])
-    
-    buscas = [l for l in [legenda1, legenda2] if l]
-    app_pyro = obter_cliente_telegram()
-
     enviados = 0
     nao_encontrados = []
 
     async with app_pyro:
-        # Garante que o Pyrogram reconheça/carregue os chats na memória da sessão
-        async for dialog in app_pyro.get_dialogs(limit=200):
+        # Carrega conversas para evitar erro de Peer ID
+        async for _ in app_pyro.get_dialogs(limit=200):
             pass
 
         for termo in buscas:
@@ -143,7 +88,23 @@ async def executar_envio(legenda1: str, legenda2: str):
             async for msg in app_pyro.get_chat_history(canal_origem, limit=3000):
                 txt = msg.caption or msg.text
                 if txt and termo.lower() in txt.lower():
-                    await msg.copy(canal_destino)
+                    # Método fallback de download/upload para burlar CHAT_FORWARDS_RESTRICTED
+                    file_path = await app_pyro.download_media(msg)
+                    
+                    try:
+                        if msg.video:
+                            await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=msg.caption)
+                        elif msg.photo:
+                            await app_pyro.send_photo(chat_id=canal_destino, photo=file_path, caption=msg.caption)
+                        elif msg.document:
+                            await app_pyro.send_document(chat_id=canal_destino, document=file_path, caption=msg.caption)
+                        else:
+                            await app_pyro.send_message(chat_id=canal_destino, text=txt)
+                    finally:
+                        # Remove o arquivo do servidor local após o envio
+                        if file_path and os.path.exists(file_path):
+                            os.remove(file_path)
+
                     encontrado = True
                     enviados += 1
                     break
@@ -159,3 +120,31 @@ async def executar_envio(legenda1: str, legenda2: str):
         msg_sucesso += f" (Não encontrados: {', '.join(nao_encontrados)})"
 
     return {"status": msg_sucesso}
+
+# Rotas da API
+@app.get("/")
+def home():
+    return {"status": "API Telegram Forwarder rodando com sucesso!"}
+
+@app.get("/legendas")
+def obter_legendas():
+    if os.path.exists("legendas.json"):
+        with open("legendas.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+@app.get("/varrer")
+async def varrer():
+    legendas_atualizadas = await executar_varredura()
+    return legendas_atualizadas
+
+@app.post("/enviar")
+async def enviar(payload: EnvioPayload):
+    if not payload.legenda1 and not payload.legenda2:
+        raise HTTPException(status_code=400, detail="Forneça ao menos uma legenda.")
+
+    try:
+        resultado = await executar_envio(payload.legenda1, payload.legenda2)
+        return resultado
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
