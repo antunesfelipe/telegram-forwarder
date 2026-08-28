@@ -95,7 +95,7 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     estado_envio["em_andamento"] = True
     estado_envio["concluido"] = False
     estado_envio["msg_final"] = ""
-    estado_envio["videos"] = [{"msg": "Buscando mídia...", "pct": 0, "status": "progress"} for _ in buscas]
+    estado_envio["videos"] = [{"msg": "Iniciando busca...", "pct": 0, "status": "progress"} for _ in buscas]
 
     app_pyro = obter_cliente_telegram()
     enviados = 0
@@ -106,22 +106,24 @@ async def processar_envio_background(legenda1: str, legenda2: str):
     try:
         async with app_pyro:
             for i, termo in enumerate(buscas):
-                termo_limpo = " ".join(termo.strip().split()).lower()
+                # Normaliza espaços extras
+                termo_limpo = " ".join(termo.strip().split())
                 encontrado = False
                 
-                estado_envio["videos"][i]["msg"] = "Buscando mídia no canal..."
+                estado_envio["videos"][i]["msg"] = f"Buscando: {termo_limpo[:20]}..."
+                estado_envio["videos"][i]["pct"] = 10 # Atualiza o status visual no front imediatamente
                 
-                # Varrer as últimas 200 mensagens previne travamentos da API e falhas por espaço extra
-                async for msg in app_pyro.get_chat_history(canal_origem, limit=200):
+                # Usa busca indexada via API nativa do Telegram (respostas em milissegundos)
+                async for msg in app_pyro.search_messages(canal_origem, query=termo_limpo, limit=10):
                     txt = msg.caption or msg.text or ""
-                    txt_limpo = " ".join(txt.strip().split()).lower()
                     
-                    if txt_limpo and termo_limpo in txt_limpo:
+                    if " ".join(termo_limpo.lower().split()) in " ".join(txt.lower().split()):
                         if msg.video or msg.animation or msg.document:
                             estado_envio["videos"][i]["msg"] = "Baixando mídia..."
+                            estado_envio["videos"][i]["pct"] = 25
                             
                             def progress_down(current, total):
-                                pct = int((current / total) * 50)
+                                pct = 25 + int((current / total) * 35) # Progresso de 25% a 60%
                                 estado_envio["videos"][i]["pct"] = pct
 
                             caminho_destino = os.path.join(temp_dir, f"vid_{i}_{msg.id}.mp4")
@@ -131,15 +133,16 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                 estado_envio["videos"][i]["msg"] = "Enviando mídia..."
 
                                 def progress_up(current, total):
-                                    pct = 50 + int((current / total) * 50)
+                                    pct = 60 + int((current / total) * 40) # Progresso de 60% a 100%
                                     estado_envio["videos"][i]["pct"] = pct
 
+                                caption_enviar = msg.caption or txt
                                 if msg.video:
-                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=msg.caption or "", progress=progress_up)
+                                    await app_pyro.send_video(chat_id=canal_destino, video=file_path, caption=caption_enviar, progress=progress_up)
                                 elif msg.animation:
-                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=msg.caption or "", progress=progress_up)
+                                    await app_pyro.send_animation(chat_id=canal_destino, animation=file_path, caption=caption_enviar, progress=progress_up)
                                 else:
-                                    await app_pyro.send_document(chat_id=canal_destino, document=file_path, caption=msg.caption or "", progress=progress_up)
+                                    await app_pyro.send_document(chat_id=canal_destino, document=file_path, caption=caption_enviar, progress=progress_up)
 
                                 estado_envio["videos"][i]["msg"] = "Concluído com sucesso!"
                                 estado_envio["videos"][i]["pct"] = 100
