@@ -1,0 +1,6 @@
+[build]
+  publish = "."
+  command = "echo 'Sem build necessario'"
+
+[build.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
