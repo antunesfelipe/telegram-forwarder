@@ -14,7 +14,7 @@ from pyrogram import Client
 
 app = FastAPI()
 
-# Permite que o seu site no GitHub Pages faça requisições para a Render sem erro de CORS
+# Permite que o seu site faça requisições para a Render sem erro de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -62,9 +62,11 @@ async def executar_varredura():
 
     resultado = sorted(list(legendas))
     
-    # Salva localmente
+    # Salva localmente na Render
     with open("legendas.json", "w", encoding="utf-8") as f:
         json.dump(resultado, f, ensure_ascii=False, indent=2)
+        
+    return resultado
 
 async def executar_envio(legenda1: str, legenda2: str):
     canal_origem = resolver_chat_id(os.environ["CANAL_ORIGEM"])
@@ -95,10 +97,19 @@ async def executar_envio(legenda1: str, legenda2: str):
 def home():
     return {"status": "API Telegram Forwarder rodando com sucesso!"}
 
+# ROTA NOVA: Devolve as legendas salvas na Render para a tela
+@app.get("/legendas")
+def obter_legendas():
+    if os.path.exists("legendas.json"):
+        with open("legendas.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+# ROTA AJUSTADA: Executa a varredura e já devolve a lista atualizada
 @app.get("/varrer")
-def varrer(background_tasks: BackgroundTasks):
-    background_tasks.add_task(executar_varredura)
-    return {"status": "Varredura iniciada em segundo plano!"}
+async def varrer():
+    legendas_atualizadas = await executar_varredura()
+    return legendas_atualizadas
 
 @app.post("/enviar")
 async def enviar(payload: EnvioPayload, background_tasks: BackgroundTasks):
