@@ -55,7 +55,7 @@ def obter_cliente_telegram():
         api_id=int(os.environ["API_ID"]), 
         api_hash=os.environ["API_HASH"], 
         session_string=os.environ["TELEGRAM_SESSION"],
-        workers=1, # Reduzido para 1 para minimizar uso concorrente de RAM
+        workers=1,
         max_concurrent_transmissions=1
     )
 
@@ -137,10 +137,9 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                         if msg_video:
                             tamanho_total = getattr(msg_video.video or msg_video.document or msg_video.animation, "file_size", 0)
                             
-                            # Verifica se o Render tem espaço suficiente no disco temporário
                             espaco_livre = shutil.disk_usage(temp_dir).free
                             if tamanho_total > 0 and espaco_livre < tamanho_total:
-                                raise Exception(f"Sem espaço no disco do Render. Necessário: {tamanho_total // (1024**2)}MB, Livre: {espaco_livre // (1024**2)}MB")
+                                raise Exception(f"Sem espaço em disco. Necessário: {tamanho_total // (1024**2)}MB, Livre: {espaco_livre // (1024**2)}MB")
 
                             estado_envio["videos"][i]["msg"] = "Baixando (Modo de Baixa Memória)..."
                             caminho_arquivo = os.path.join(temp_dir, f"vid_{i}.mp4")
@@ -149,7 +148,6 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                             bytes_baixados = 0
                             bytes_desde_ultimo_gc = 0
 
-                            # STREAMING CONTROLADO: Gravação em blocos restritos a RAM baixa
                             with open(caminho_arquivo, "wb") as f:
                                 async for chunk in app_pyro.stream_media(msg_video):
                                     f.write(chunk)
@@ -165,7 +163,6 @@ async def processar_envio_background(legenda1: str, legenda2: str):
                                         estado_envio["videos"][i]["pct"] = pct
                                         last_update = time.time()
 
-                                    # Limpa a memória a cada 10 MB baixados (Limite de ~60% de RAM)
                                     if bytes_desde_ultimo_gc >= 10485760:
                                         gc.collect()
                                         bytes_desde_ultimo_gc = 0
@@ -261,3 +258,8 @@ async def enviar(payload: EnvioPayload, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(processar_envio_background, payload.legenda1, payload.legenda2)
     return {"status": "iniciado", "server_id": SERVER_RUN_ID}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
